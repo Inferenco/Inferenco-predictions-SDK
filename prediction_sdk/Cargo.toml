@@ -2,6 +2,16 @@
 name = "prediction_sdk"
 version = "0.1.0"
 edition = "2024"
+authors = ["Inferenco Team"]
+description = "Advanced cryptocurrency forecasting SDK combining statistical models, machine learning (SVR), and technical analysis with intelligent caching and rate limiting"
+license = "MIT"
+repository = "https://github.com/your-org/Inferenco-predictions-SDK"
+homepage = "https://github.com/your-org/Inferenco-predictions-SDK"
+documentation = "https://docs.rs/prediction_sdk"
+readme = "../README.md"
+keywords = ["cryptocurrency", "forecasting", "prediction", "machine-learning", "technical-analysis"]
+categories = ["finance", "algorithms", "science"]
+
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
