@@ -350,6 +350,7 @@ fn build_price_points(payload: MarketChartResponse) -> Result<Vec<PricePoint>, P
 mod tests {
     use super::*;
     use httpmock::prelude::*;
+    use crate::helpers;
 
     fn build_sdk(server: &MockServer) -> PredictionSdk {
         let client = Client::builder().build().unwrap();
@@ -398,5 +399,39 @@ mod tests {
 
         mock.assert_async().await;
         assert!(matches!(result, PredictionError::Network(message) if message.contains("unexpected status")));
+    }
+
+    #[tokio::test]
+    async fn short_forecast_matches_helper_math() {
+        let history = (0..60)
+            .map(|idx| PricePoint {
+                timestamp: Utc::now() + Duration::minutes(idx),
+                price: 100.0 + idx as f64,
+                volume: None,
+            })
+            .collect::<Vec<_>>();
+
+        let sentiment = SentimentSnapshot {
+            news_score: 0.2,
+            social_score: -0.1,
+        };
+
+        let sdk = PredictionSdk::new().expect("sdk construction should succeed");
+        let horizon = ShortForecastHorizon::OneHour;
+        let result = sdk
+            .run_short_forecast(&history, horizon, Some(sentiment.clone()))
+            .await
+            .expect("forecast should succeed");
+
+        let window = helpers::short_horizon_window(horizon);
+        let moving_average = helpers::calculate_moving_average(&history, window).unwrap();
+        let volatility = helpers::calculate_volatility(&history).unwrap();
+        let expected = helpers::weight_with_sentiment(
+            moving_average + volatility * 0.1,
+            &sentiment,
+        );
+
+        assert!((result.expected_price - expected).abs() < f64::EPSILON);
+        assert_eq!(result.horizon, horizon);
     }
 }
