@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
@@ -49,33 +49,32 @@ impl PredictionSdk {
         days: u32,
     ) -> Result<Vec<PricePoint>, PredictionError> {
         let url = format!("{}/coins/{}/market_chart", self.market_base_url, asset_id);
-        let response = self
-            .client
-            .get(url)
-            .query(&[("vs_currency", vs_currency), ("days", &days.to_string())])
-            .send()
-            .await
-            .map_err(|err| PredictionError::Network(err.to_string()))?;
+        let query = vec![
+            ("vs_currency", vs_currency.to_string()),
+            ("days", days.to_string()),
+        ];
 
-        if response.status() == StatusCode::TOO_MANY_REQUESTS {
-            return Err(PredictionError::Network(
-                "rate limited by upstream provider".to_string(),
-            ));
-        }
+        self.request_market_chart(url, query).await
+    }
 
-        if !response.status().is_success() {
-            return Err(PredictionError::Network(format!(
-                "unexpected status: {}",
-                response.status()
-            )));
-        }
+    pub async fn fetch_market_chart_range(
+        &self,
+        id: &str,
+        vs_currency: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<PricePoint>, PredictionError> {
+        let url = format!(
+            "{}/coins/{}/market_chart/range",
+            self.market_base_url, id
+        );
+        let query = vec![
+            ("vs_currency", vs_currency.to_string()),
+            ("from", from.timestamp().to_string()),
+            ("to", to.timestamp().to_string()),
+        ];
 
-        let payload: MarketChartResponse = response
-            .json()
-            .await
-            .map_err(|err| PredictionError::Serialization(err.to_string()))?;
-
-        build_price_points(payload)
+        self.request_market_chart(url, query).await
     }
 
     pub async fn run_short_forecast(
@@ -129,6 +128,40 @@ impl PredictionSdk {
             percentile_90,
             confidence,
         })
+    }
+
+    async fn request_market_chart(
+        &self,
+        url: String,
+        query: Vec<(&str, String)>,
+    ) -> Result<Vec<PricePoint>, PredictionError> {
+        let response = self
+            .client
+            .get(url)
+            .query(&query)
+            .send()
+            .await
+            .map_err(|err| PredictionError::Network(err.to_string()))?;
+
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(PredictionError::Network(
+                "rate limited by upstream provider".to_string(),
+            ));
+        }
+
+        if !response.status().is_success() {
+            return Err(PredictionError::Network(format!(
+                "unexpected status: {}",
+                response.status()
+            )));
+        }
+
+        let payload: MarketChartResponse = response
+            .json()
+            .await
+            .map_err(|err| PredictionError::Serialization(err.to_string()))?;
+
+        build_price_points(payload)
     }
 }
 
