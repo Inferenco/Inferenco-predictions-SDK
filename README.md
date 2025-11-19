@@ -6,7 +6,7 @@ Inferenco Predictions SDK is a Rust crate that fetches market data from CoinGeck
 
 - **Deterministic research tooling** – keep all forecasting logic inside a single Rust crate so MCP tools and backend services run the same calculations.
 - **Composable architecture** – split DTOs, helpers, handlers, and implementations into focused modules so integrators can mix the SDK with their own orchestrators.
-- **Practical forecasts** – expose both short-horizon signals (minutes to hours) and longer simulations (days to weeks) that combine price history, Monte Carlo sampling, and optional sentiment snapshots.
+- **Practical forecasts** – expose both short-horizon signals (minutes to hours) and longer simulations (days to multi-year horizons) that combine price history, Monte Carlo sampling, and optional sentiment snapshots.
 - **Operational safety** – lean on `reqwest` + `rustls`, typed errors via `thiserror`, and careful normalization to avoid panics in production code.
 
 ## Architecture overview
@@ -102,9 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run_short_forecast(&history, ShortForecastHorizon::OneHour, Some(sentiment.clone()))
         .await?;
 
-    // Long horizon forecast (1 week)
+    // Long horizon forecast (6 months)
     let long = sdk
-        .run_long_forecast(&history, LongForecastHorizon::OneWeek, Some(sentiment))
+        .run_long_forecast(&history, LongForecastHorizon::SixMonths, Some(sentiment))
         .await?;
 
     println!("Short: {:?}", short);
@@ -114,6 +114,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 See `handler::run_prediction_handler` for a ready-made orchestration function that bundles the above steps for typical MCP tools or CLI entry points.
+
+### Choosing a long-horizon forecast
+
+`LongForecastHorizon` now spans tactical and strategic windows so you can match the simulation to your use case:
+
+| Variant | Approximate days | When to use |
+|---------|------------------|-------------|
+| `OneDay`, `ThreeDays`, `OneWeek` | 1–7 days | Intra-week risk, short squeezes, liquidation alerts. |
+| `OneMonth` | 30 days | Monthly rebalancing, post-event digestion. |
+| `ThreeMonths`, `SixMonths` | 90 / 180 days | Quarterly treasury planning or macro-driven theses. |
+| `OneYear`, `FourYears` | ~360 / ~1,440 days | Long-term strategy, mining runway modeling, and protocol treasury projections. |
+
+Internally the SDK scales the Monte Carlo simulation count as horizons expand so that week-long runs stay highly granular while multi-year scenarios remain computationally practical.
 
 ## MCP integration notes
 

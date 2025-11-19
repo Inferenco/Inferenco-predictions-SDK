@@ -17,11 +17,16 @@ pub enum ShortForecastHorizon {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum LongForecastHorizon {
     OneDay,
     ThreeDays,
     OneWeek,
     OneMonth,
+    ThreeMonths,
+    SixMonths,
+    OneYear,
+    FourYears,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
