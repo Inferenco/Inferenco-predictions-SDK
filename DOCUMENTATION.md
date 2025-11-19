@@ -10,6 +10,24 @@
 6. [Configuration](#configuration)
 7. [MCP Integration](#mcp-integration)
 
+## Installation
+
+Add `prediction_sdk` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+prediction_sdk = "0.1.0"
+tokio = { version = "1", features = ["full"] }
+```
+
+Or use `cargo add`:
+
+```bash
+cargo add prediction_sdk
+cargo add tokio --features full
+```
+
+
 ## Architecture Overview
 
 ```
@@ -164,6 +182,185 @@ let result = sdk.forecast(&history, horizon, sentiment).await?;
     bollinger_width: f64,             // Normalized band width
     trend_strength: f64,              // MACD / price * 100
 }
+```
+
+### Custom Wrapper Functions
+
+Here are examples of building your own helper functions that wrap the SDK:
+
+#### Simple Forecast Helper
+```rust
+use prediction_sdk::{PredictionSdk, ForecastHorizon, ShortForecastHorizon, ForecastResult, PredictionError};
+
+pub async fn get_bitcoin_1h_forecast(
+    sdk: &PredictionSdk,
+) -> Result<f64, PredictionError> {
+    let result = sdk.forecast_with_fetch(
+        "bitcoin",
+        "usd",
+        ForecastHorizon::Short(ShortForecastHorizon::OneHour),
+        None, // No sentiment
+    ).await?;
+
+    match result {
+        ForecastResult::Short(forecast) => Ok(forecast.expected_price),
+        ForecastResult::Long(_) => unreachable!(),
+    }
+}
+```
+
+#### Multi-Asset Comparison
+```rust
+use prediction_sdk::{PredictionSdk, ForecastHorizon, ShortForecastHorizon, ForecastResult, PredictionError};
+
+pub struct AssetForecast {
+    pub asset_id: String,
+    pub expected_price: f64,
+    pub confidence: f32,
+    pub rsi: Option<f64>,
+}
+
+pub async fn compare_assets(
+    sdk: &PredictionSdk,
+    assets: &[&str],
+    horizon: ShortForecastHorizon,
+) -> Result<Vec<AssetForecast>, PredictionError> {
+    let mut results = Vec::new();
+
+    for asset_id in assets {
+        let result = sdk.forecast_with_fetch(
+            asset_id,
+            "usd",
+            ForecastHorizon::Short(horizon),
+            None,
+        ).await?;
+
+        if let ForecastResult::Short(forecast) = result {
+            results.push(AssetForecast {
+                asset_id: asset_id.to_string(),
+                expected_price: forecast.expected_price,
+                confidence: forecast.confidence,
+                rsi: forecast.technical_signals.map(|s| s.rsi),
+            });
+        }
+    }
+
+    Ok(results)
+}
+
+// Usage:
+// let assets = vec!["bitcoin", "ethereum", "solana"];
+// let forecasts = compare_assets(&sdk, &assets, ShortForecastHorizon::OneHour).await?;
+```
+
+#### Trading Signal Generator
+```rust
+use prediction_sdk::{PredictionSdk, ForecastHorizon, ShortForecastHorizon, ForecastResult, PredictionError, SentimentSnapshot};
+
+pub enum Signal {
+    StrongBuy,
+    Buy,
+    Hold,
+    Sell,
+    StrongSell,
+}
+
+pub async fn generate_trading_signal(
+    sdk: &PredictionSdk,
+    asset_id: &str,
+    current_price: f64,
+    sentiment: Option<SentimentSnapshot>,
+) -> Result<Signal, PredictionError> {
+    let result = sdk.forecast_with_fetch(
+        asset_id,
+        "usd",
+        ForecastHorizon::Short(ShortForecastHorizon::FourHours),
+        sentiment,
+    ).await?;
+
+    if let ForecastResult::Short(forecast) = result {
+        let price_change_pct = ((forecast.expected_price - current_price) / current_price) * 100.0;
+        let confidence = forecast.confidence;
+        
+        // Check technical signals
+        let rsi = forecast.technical_signals.as_ref().map(|s| s.rsi);
+        
+        let signal = match (price_change_pct, confidence, rsi) {
+            // Strong buy: >3% up, high confidence, oversold RSI
+            (change, conf, Some(rsi)) if change > 3.0 && conf > 0.6 && rsi < 30.0 => Signal::StrongBuy,
+            // Buy: >1.5% up, decent confidence
+            (change, conf, _) if change > 1.5 && conf > 0.5 => Signal::Buy,
+            // Strong sell: >3% down, high confidence, overbought RSI
+            (change, conf, Some(rsi)) if change < -3.0 && conf > 0.6 && rsi > 70.0 => Signal::StrongSell,
+            // Sell: >1.5% down, decent confidence
+            (change, conf, _) if change < -1.5 && conf > 0.5 => Signal::Sell,
+            // Hold otherwise
+            _ => Signal::Hold,
+        };
+
+        Ok(signal)
+    } else {
+        Err(PredictionError::Serialization("Expected short forecast".to_string()))
+    }
+}
+```
+
+#### Batch Forecasting with Error Handling
+```rust
+use prediction_sdk::{PredictionSdk, ForecastHorizon, LongForecastHorizon, ForecastResult, PredictionError};
+
+pub struct ForecastSummary {
+    pub asset_id: String,
+    pub mean_price: f64,
+    pub bullish_scenario: f64,
+    pub bearish_scenario: f64,
+}
+
+pub async fn get_portfolio_forecasts(
+    sdk: &PredictionSdk,
+    assets: &[&str],
+) -> Vec<Result<ForecastSummary, String>> {
+    let mut summaries = Vec::new();
+
+    for asset_id in assets {
+        let result = sdk.forecast_with_fetch(
+            asset_id,
+            "usd",
+            ForecastHorizon::Long(LongForecastHorizon::OneMonth),
+            None,
+        ).await;
+
+        match result {
+            Ok(ForecastResult::Long(forecast)) => {
+                summaries.push(Ok(ForecastSummary {
+                    asset_id: asset_id.to_string(),
+                    mean_price: forecast.mean_price,
+                    bullish_scenario: forecast.percentile_90,
+                    bearish_scenario: forecast.percentile_10,
+                }));
+            }
+            Ok(ForecastResult::Short(_)) => {
+                summaries.push(Err(format!("{}: Unexpected short forecast", asset_id)));
+            }
+            Err(e) => {
+                summaries.push(Err(format!("{}: {}", asset_id, e)));
+            }
+        }
+    }
+
+    summaries
+}
+
+// Usage:
+// let portfolio = vec!["bitcoin", "ethereum", "cardano"];
+// let forecasts = get_portfolio_forecasts(&sdk, &portfolio).await;
+// 
+// for result in forecasts {
+//     match result {
+//         Ok(summary) => println!("{}: ${:.2}", summary.asset_id, summary.mean_price),
+//         Err(e) => eprintln!("Error: {}", e),
+//     }
+// }
 ```
 
 ## Caching Strategy

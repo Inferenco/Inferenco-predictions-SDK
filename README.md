@@ -11,6 +11,16 @@ A Rust library for cryptocurrency price forecasting that combines statistical me
 - **Technical Analysis**: RSI, MACD, Bollinger Bands
 - **Local AI**: On-the-fly SmartCore SVR training (no external models needed)
 
+## Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+prediction_sdk = "0.1.0"
+tokio = { version = "1", features = ["full"] }
+```
+
 ## Quick Start
 
 ```bash
