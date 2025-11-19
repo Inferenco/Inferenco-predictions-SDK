@@ -143,8 +143,21 @@ Internally the SDK scales the Monte Carlo simulation count as horizons expand so
 ## MCP integration notes
 
 - **Tooling contract** – DTOs such as `ShortForecastResult`, `LongForecastResult`, and `ForecastDecomposition` live in `dto.rs`, making it trivial to serialize them as JSON payloads over MCP.
-- **Handler hook** – Expose `run_prediction_handler` as an MCP command handler to keep the host lightweight; the handler owns SDK initialization, data fetching, and both forecast calls.
+- **Handler hook** – Expose `run_prediction_handler(request: ForecastRequest) -> Result<String, PredictionError>` as an MCP command handler to keep the host lightweight; the handler owns SDK initialization, data fetching, and horizon-specific forecast calls.
 - **Async runtime** – MCP servers written in Rust can reuse the `tokio` runtime already required by the SDK. Ensure your MCP dispatcher awaits the returned futures.
 - **Error mapping** – Convert `PredictionError` into the MCP error surface (e.g., `ToolError` or JSON-RPC error) so clients receive human-readable failure reasons (`Network`, `Serialization`, etc.).
 
 With these guidelines, the Inferenco Predictions SDK can power MCP tools, backend cron jobs, or research workflows with the same deterministic forecasting logic.
+
+**Example MCP payload**
+
+```json
+{
+  "token_id": "bitcoin",
+  "vs_currency": "usd",
+  "horizon": { "type": "short", "value": "one_hour" },
+  "sentiment": { "news_score": 0.1, "social_score": -0.05 }
+}
+```
+
+When `sentiment` is omitted, the handler defaults to a neutral snapshot (`0.0` news and social scores) before invoking the short- or long-horizon forecast and returning the serialized JSON result.
