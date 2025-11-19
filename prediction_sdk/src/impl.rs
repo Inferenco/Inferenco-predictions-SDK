@@ -1,6 +1,15 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
+use governor::{Quota, RateLimiter};
+use governor::clock::DefaultClock;
+use governor::state::InMemoryState;
+use governor::middleware::NoOpMiddleware;
+use nonzero_ext::nonzero;
+
+use std::sync::Arc;
+use tokio::time::sleep;
+
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
@@ -25,6 +34,7 @@ const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
 pub struct PredictionSdk {
     client: Client,
     market_base_url: String,
+    limiter: Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
 }
 
 impl PredictionSdk {
@@ -44,9 +54,14 @@ impl PredictionSdk {
         let client = Client::builder()
             .build()
             .map_err(|err| PredictionError::Network(err.to_string()))?;
+        // Rate limit: 8 requests per second (burst 8)
+        let quota = Quota::per_second(nonzero!(8u32));
+        let limiter = Arc::new(RateLimiter::direct(quota));
+
         Ok(Self {
             client,
             market_base_url: DEFAULT_BASE_URL.to_string(),
+            limiter,
         })
     }
 
@@ -65,9 +80,14 @@ impl PredictionSdk {
     /// ```
     pub fn with_client(client: Client, market_base_url: Option<String>) -> Self {
         let url = market_base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        // Rate limit: 8 requests per second (burst 8)
+        let quota = Quota::per_second(nonzero!(8u32));
+        let limiter = Arc::new(RateLimiter::direct(quota));
+
         Self {
             client,
             market_base_url: url,
+            limiter,
         }
     }
 
@@ -160,7 +180,20 @@ impl PredictionSdk {
         }
 
         let decomposition = helpers::decompose_series(history)?;
-        let confidence_value = (volatility + decomposition.noise).recip().abs();
+        // Use a sigmoid-like decay for confidence based on volatility.
+        // High volatility -> Low confidence.
+        // Low volatility -> High confidence.
+        // Formula: 1.0 / (1.0 + scaling_factor * volatility * sqrt(time))
+        
+        let horizon_hours: f64 = match horizon {
+            ShortForecastHorizon::FifteenMinutes => 0.25,
+            ShortForecastHorizon::OneHour => 1.0,
+            ShortForecastHorizon::FourHours => 4.0,
+        };
+
+        let scaling_factor = 100.0; // Adjust this to tune sensitivity
+        let time_scaling = horizon_hours.sqrt();
+        let confidence_value = 1.0 / (1.0 + scaling_factor * (volatility + decomposition.noise) * time_scaling);
         let confidence = helpers::normalize_confidence(confidence_value);
 
         // Calculate technical signals
@@ -308,33 +341,64 @@ impl PredictionSdk {
         url: String,
         query: Vec<(&str, String)>,
     ) -> Result<Vec<PricePoint>, PredictionError> {
-        let response = self
-            .client
-            .get(url)
-            .query(&query)
-            .send()
-            .await
-            .map_err(|err| PredictionError::Network(err.to_string()))?;
+        let max_retries = 5;
+        let mut attempt = 0;
+        let base_delay_ms = 500;
 
-        if response.status() == StatusCode::TOO_MANY_REQUESTS {
-            return Err(PredictionError::Network(
-                "rate limited by upstream provider".to_string(),
-            ));
-        }
+        loop {
+            // 1. Wait for rate limiter (Token Bucket)
+            self.limiter.until_ready().await;
 
-        if !response.status().is_success() {
+            // 2. Make request
+            let response = self
+                .client
+                .get(&url)
+                .query(&query)
+                .send()
+                .await
+                .map_err(|err| PredictionError::Network(err.to_string()))?;
+
+            let status = response.status();
+
+            if status.is_success() {
+                let payload: MarketChartResponse = response
+                    .json()
+                    .await
+                    .map_err(|err| PredictionError::Serialization(err.to_string()))?;
+                return build_price_points(payload);
+            }
+
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                attempt += 1;
+                if attempt > max_retries {
+                    return Err(PredictionError::Network(
+                        "rate limited by upstream provider (max retries exceeded)".to_string(),
+                    ));
+                }
+
+                let retry_after = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+
+                let delay = if let Some(seconds) = retry_after {
+                    std::time::Duration::from_secs(seconds)
+                } else {
+                    // Exponential backoff: 500ms * 2^(attempt-1)
+                    let factor = 2u64.pow(attempt as u32 - 1);
+                    std::time::Duration::from_millis(base_delay_ms * factor)
+                };
+
+                sleep(delay).await;
+                continue;
+            }
+
             return Err(PredictionError::Network(format!(
                 "unexpected status: {}",
-                response.status()
+                status
             )));
         }
-
-        let payload: MarketChartResponse = response
-            .json()
-            .await
-            .map_err(|err| PredictionError::Serialization(err.to_string()))?;
-
-        build_price_points(payload)
     }
 }
 
@@ -400,8 +464,8 @@ mod tests {
             .await
             .unwrap_err();
 
-        mock.assert_async().await;
-        assert!(matches!(result, PredictionError::Network(message) if message.contains("rate limited")));
+        mock.assert_hits_async(6).await;
+        assert!(matches!(result, PredictionError::Network(message) if message.contains("max retries exceeded")));
     }
 
     #[tokio::test]
