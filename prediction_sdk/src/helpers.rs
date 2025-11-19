@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
-use rand::distributions::{Distribution, StandardNormal};
 use rand::Rng;
+use rand_distr::StandardNormal;
 use statrs::statistics::Statistics;
 
 use crate::dto::{
@@ -27,7 +27,18 @@ pub(crate) fn long_horizon_days(horizon: LongForecastHorizon) -> u32 {
         LongForecastHorizon::ThreeDays => 3,
         LongForecastHorizon::OneWeek => 7,
         LongForecastHorizon::OneMonth => 30,
+        LongForecastHorizon::ThreeMonths => 3 * 30,
+        LongForecastHorizon::SixMonths => 6 * 30,
+        LongForecastHorizon::OneYear => 12 * 30,
+        LongForecastHorizon::FourYears => 48 * 30,
     }
+}
+
+pub(crate) fn scaled_simulation_count(days: u32, base: usize) -> usize {
+    let normalized_days = days.max(30);
+    let scaling = (30.0f64 / normalized_days as f64).sqrt();
+    let scaled = (base as f64 * scaling).round() as usize;
+    scaled.clamp(32, base)
 }
 
 pub(crate) fn calculate_moving_average(
