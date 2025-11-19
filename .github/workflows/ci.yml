@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./prediction_sdk
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,8 +27,8 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            prediction_sdk/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('prediction_sdk/Cargo.lock') }}
 
       - name: Install dependencies
         run: cargo fetch
