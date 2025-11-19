@@ -65,6 +65,14 @@ pub struct SentimentSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TechnicalSignals {
+    pub rsi: f64,
+    pub macd_divergence: f64,
+    pub bollinger_width: f64,
+    pub trend_strength: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 /// Wrapper for selecting either a short or long forecast horizon.
 ///
@@ -118,6 +126,10 @@ pub struct ShortForecastResult {
     pub expected_price: f64,
     pub confidence: f32,
     pub decomposition: ForecastDecomposition,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub technical_signals: Option<TechnicalSignals>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_prediction: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -135,6 +147,8 @@ pub struct LongForecastResult {
     pub percentile_10: f64,
     pub percentile_90: f64,
     pub confidence: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub technical_signals: Option<TechnicalSignals>,
 }
 
 #[derive(Debug, Error)]

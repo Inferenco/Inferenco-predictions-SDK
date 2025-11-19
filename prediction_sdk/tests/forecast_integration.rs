@@ -47,6 +47,9 @@ async fn forecast_with_fetch_handles_short_horizon() {
         prediction_sdk::ForecastResult::Short(short) => {
             assert_eq!(short.horizon, ShortForecastHorizon::OneHour);
             assert!(short.expected_price.is_finite());
+            // Verify advanced features
+            assert!(short.technical_signals.is_some());
+            assert!(short.ml_prediction.is_some());
         }
         _ => panic!("expected short forecast"),
     }

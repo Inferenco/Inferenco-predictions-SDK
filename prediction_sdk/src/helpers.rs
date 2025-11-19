@@ -5,11 +5,7 @@ use rand_distr::StandardNormal;
 use statrs::statistics::Statistics;
 
 use crate::dto::{
-    ForecastDecomposition,
-    LongForecastHorizon,
-    PredictionError,
-    PricePoint,
-    SentimentSnapshot,
+    ForecastDecomposition, LongForecastHorizon, PredictionError, PricePoint, SentimentSnapshot,
     ShortForecastHorizon,
 };
 
@@ -87,7 +83,10 @@ pub(crate) fn run_monte_carlo(
     days: u32,
     simulations: usize,
 ) -> Result<Vec<f64>, PredictionError> {
-    let last_price = prices.last().map(|p| p.price).ok_or(PredictionError::InsufficientData)?;
+    let last_price = prices
+        .last()
+        .map(|p| p.price)
+        .ok_or(PredictionError::InsufficientData)?;
     let volatility = calculate_volatility(prices)?;
     if volatility <= f64::EPSILON {
         return Ok(vec![last_price; simulations]);
@@ -149,7 +148,9 @@ pub(crate) fn normalize_confidence(value: f64) -> f32 {
     value.clamp(0.0, 1.0) as f32
 }
 
-pub(crate) fn decompose_series(prices: &[PricePoint]) -> Result<ForecastDecomposition, PredictionError> {
+pub(crate) fn decompose_series(
+    prices: &[PricePoint],
+) -> Result<ForecastDecomposition, PredictionError> {
     if prices.len() < 2 {
         return Err(PredictionError::InsufficientData);
     }
@@ -228,7 +229,10 @@ mod tests {
 
     #[test]
     fn horizon_to_lookback_mapping_matches_expected() {
-        assert_eq!(short_horizon_window(ShortForecastHorizon::FifteenMinutes), 16);
+        assert_eq!(
+            short_horizon_window(ShortForecastHorizon::FifteenMinutes),
+            16
+        );
         assert_eq!(short_horizon_window(ShortForecastHorizon::OneHour), 48);
         assert_eq!(short_horizon_window(ShortForecastHorizon::FourHours), 96);
 
@@ -240,5 +244,32 @@ mod tests {
         assert_eq!(long_horizon_days(LongForecastHorizon::SixMonths), 180);
         assert_eq!(long_horizon_days(LongForecastHorizon::OneYear), 360);
         assert_eq!(long_horizon_days(LongForecastHorizon::FourYears), 1440);
+    }
+    #[test]
+    fn calculate_moving_average_errors_on_insufficient_data() {
+        let history = sample_prices(5, 100.0, 1.0);
+        let result = calculate_moving_average(&history, 10);
+        assert!(matches!(result, Err(PredictionError::InsufficientData)));
+    }
+
+    #[test]
+    fn calculate_volatility_handles_flat_prices() {
+        let history = sample_prices(10, 100.0, 0.0);
+        let volatility = calculate_volatility(&history).unwrap();
+        assert!(volatility.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn calculate_volatility_errors_on_insufficient_data() {
+        let history = sample_prices(1, 100.0, 0.0);
+        let result = calculate_volatility(&history);
+        assert!(matches!(result, Err(PredictionError::InsufficientData)));
+    }
+
+    #[test]
+    fn run_monte_carlo_errors_on_insufficient_data() {
+        let history = sample_prices(1, 100.0, 0.0);
+        let result = run_monte_carlo(&history, 5, 10);
+        assert!(matches!(result, Err(PredictionError::InsufficientData)));
     }
 }

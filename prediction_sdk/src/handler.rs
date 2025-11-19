@@ -1,13 +1,8 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    helpers,
-    ForecastHorizon,
-    ForecastRequest,
-    ForecastResult,
-    PredictionError,
-    PredictionSdk,
-    SentimentSnapshot,
+    ForecastHorizon, ForecastRequest, ForecastResult, PredictionError, PredictionSdk,
+    SentimentSnapshot, helpers,
 };
 
 const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
@@ -26,7 +21,7 @@ const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
 /// ```no_run
 /// use prediction_sdk::{
 ///     ForecastHorizon, ForecastRequest, SentimentSnapshot, ShortForecastHorizon,
-/// }; 
+/// };
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), prediction_sdk::PredictionError> {
@@ -45,9 +40,7 @@ const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn run_prediction_handler(
-    request: ForecastRequest,
-) -> Result<String, PredictionError> {
+pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, PredictionError> {
     let sdk = PredictionSdk::new()?;
     let sentiment = request.sentiment.unwrap_or(SentimentSnapshot {
         news_score: 0.0,
@@ -64,8 +57,7 @@ pub async fn run_prediction_handler(
                 )
                 .await?;
 
-            sdk
-                .run_short_forecast(&history, horizon, Some(sentiment.clone()))
+            sdk.run_short_forecast(&history, horizon, Some(sentiment.clone()))
                 .await
                 .map(ForecastResult::Short)
         }
@@ -83,6 +75,5 @@ pub async fn run_prediction_handler(
         }
     }?;
 
-    serde_json::to_string(&forecast)
-        .map_err(|err| PredictionError::Serialization(err.to_string()))
+    serde_json::to_string(&forecast).map_err(|err| PredictionError::Serialization(err.to_string()))
 }
