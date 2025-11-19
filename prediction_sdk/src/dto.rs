@@ -51,6 +51,13 @@ pub enum ForecastHorizon {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum ForecastResult {
+    Short(ShortForecastResult),
+    Long(LongForecastResult),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ForecastRequest {
     pub token_id: String,
     pub horizon: ForecastHorizon,

@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
 use crate::helpers;
 use crate::{
+    ForecastHorizon,
+    ForecastResult,
     LongForecastHorizon,
     LongForecastResult,
     PredictionError,
@@ -17,6 +19,7 @@ use crate::{
 
 const DEFAULT_BASE_URL: &str = "https://api.coingecko.com/api/v3";
 const DEFAULT_SIMULATIONS: usize = 256;
+const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
 
 pub struct PredictionSdk {
     client: Client,
@@ -128,6 +131,62 @@ impl PredictionSdk {
             percentile_90,
             confidence,
         })
+    }
+
+    pub async fn forecast(
+        &self,
+        history: &[PricePoint],
+        horizon: ForecastHorizon,
+        sentiment: Option<SentimentSnapshot>,
+    ) -> Result<ForecastResult, PredictionError> {
+        match horizon {
+            ForecastHorizon::Short(short_horizon) => self
+                .run_short_forecast(history, short_horizon, sentiment)
+                .await
+                .map(ForecastResult::Short),
+            ForecastHorizon::Long(long_horizon) => self
+                .run_long_forecast(history, long_horizon, sentiment)
+                .await
+                .map(ForecastResult::Long),
+        }
+    }
+
+    pub async fn forecast_with_fetch(
+        &self,
+        asset_id: &str,
+        vs_currency: &str,
+        horizon: ForecastHorizon,
+        sentiment: Option<SentimentSnapshot>,
+    ) -> Result<ForecastResult, PredictionError> {
+        match horizon {
+            ForecastHorizon::Short(short_horizon) => {
+                let history = self
+                    .fetch_price_history(asset_id, vs_currency, SHORT_FORECAST_LOOKBACK_DAYS)
+                    .await?;
+                self
+                    .forecast(
+                        &history,
+                        ForecastHorizon::Short(short_horizon),
+                        sentiment,
+                    )
+                    .await
+            }
+            ForecastHorizon::Long(long_horizon) => {
+                let now = Utc::now();
+                let lookback_days = helpers::long_horizon_days(long_horizon);
+                let start = now - Duration::days(i64::from(lookback_days));
+                let history = self
+                    .fetch_market_chart_range(asset_id, vs_currency, start, now)
+                    .await?;
+                self
+                    .forecast(
+                        &history,
+                        ForecastHorizon::Long(long_horizon),
+                        sentiment,
+                    )
+                    .await
+            }
+        }
     }
 
     async fn request_market_chart(

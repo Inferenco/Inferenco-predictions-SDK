@@ -75,6 +75,8 @@ Because the SDK downloads live data during integration tests, keep an eye on Coi
 ```rust
 use chrono::{Duration, Utc};
 use prediction_sdk::{
+    ForecastHorizon,
+    ForecastResult,
     PredictionSdk,
     SentimentSnapshot,
     ShortForecastHorizon,
@@ -98,12 +100,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         social_score: 0.05,
     };
 
-    // Short horizon forecast (1 hour)
+    // One-call short horizon forecast (1 hour) with history fetched internally.
     let short = sdk
-        .run_short_forecast(&history, ShortForecastHorizon::OneHour, Some(sentiment.clone()))
+        .forecast_with_fetch(
+            "bitcoin",
+            "usd",
+            ForecastHorizon::Short(ShortForecastHorizon::OneHour),
+            Some(sentiment.clone()),
+        )
         .await?;
 
-    // Long horizon forecast (6 months)
+    // Manual fetch + dispatch for a long horizon forecast (6 months)
     let long_horizon = LongForecastHorizon::SixMonths;
     let range_end = Utc::now();
     let range_start = range_end - Duration::days(180);
@@ -111,11 +118,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fetch_market_chart_range("bitcoin", "usd", range_start, range_end)
         .await?;
     let long = sdk
-        .run_long_forecast(&long_history, long_horizon, Some(sentiment))
+        .forecast(
+            &long_history,
+            ForecastHorizon::Long(long_horizon),
+            Some(sentiment),
+        )
         .await?;
 
-    println!("Short: {:?}", short);
-    println!("Long: {:?}", long);
+    match short {
+        ForecastResult::Short(result) => println!("Short forecast: {:?}", result),
+        ForecastResult::Long(_) => unreachable!("short forecast returned long result"),
+    }
+
+    match long {
+        ForecastResult::Long(result) => println!("Long forecast: {:?}", result),
+        ForecastResult::Short(_) => unreachable!("long forecast returned short result"),
+    }
     Ok(())
 }
 ```
