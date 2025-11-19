@@ -16,7 +16,7 @@ pub struct PricePoint {
     pub volume: Option<f64>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 /// Short forecast horizons used for intraday predictions.
 ///
@@ -27,7 +27,7 @@ pub enum ShortForecastHorizon {
     FourHours,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 /// Longer-term forecast horizons ranging from one day to four years.
 ///

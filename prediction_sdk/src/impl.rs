@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::helpers;
 use crate::analysis;
+use crate::cache::{ApiCache, ForecastCache, ApiCacheKey, ForecastCacheKey, ForecastCacheValue, hash_sentiment};
 use crate::{
     ForecastHorizon,
     ForecastResult,
@@ -35,6 +36,8 @@ pub struct PredictionSdk {
     client: Client,
     market_base_url: String,
     limiter: Arc<RateLimiter<governor::state::NotKeyed, InMemoryState, DefaultClock, NoOpMiddleware>>,
+    api_cache: Arc<ApiCache>,
+    forecast_cache: Arc<ForecastCache>,
 }
 
 impl PredictionSdk {
@@ -57,11 +60,15 @@ impl PredictionSdk {
         // Rate limit: 8 requests per second (burst 8)
         let quota = Quota::per_second(nonzero!(8u32));
         let limiter = Arc::new(RateLimiter::direct(quota));
+        let api_cache = Arc::new(ApiCache::new());
+        let forecast_cache = Arc::new(ForecastCache::new());
 
         Ok(Self {
             client,
             market_base_url: DEFAULT_BASE_URL.to_string(),
             limiter,
+            api_cache,
+            forecast_cache,
         })
     }
 
@@ -83,11 +90,15 @@ impl PredictionSdk {
         // Rate limit: 8 requests per second (burst 8)
         let quota = Quota::per_second(nonzero!(8u32));
         let limiter = Arc::new(RateLimiter::direct(quota));
+        let api_cache = Arc::new(ApiCache::new());
+        let forecast_cache = Arc::new(ForecastCache::new());
 
         Self {
             client,
             market_base_url: url,
             limiter,
+            api_cache,
+            forecast_cache,
         }
     }
 
@@ -106,13 +117,29 @@ impl PredictionSdk {
         vs_currency: &str,
         days: u32,
     ) -> Result<Vec<PricePoint>, PredictionError> {
+        // Check API cache first
+        let cache_key = ApiCacheKey::DaysLookback {
+            asset_id: asset_id.to_string(),
+            vs_currency: vs_currency.to_string(),
+            days,
+        };
+
+        if let Some(cached) = self.api_cache.get(&cache_key).await {
+            return Ok(cached);
+        }
+
         let url = format!("{}/coins/{}/market_chart", self.market_base_url, asset_id);
         let query = vec![
             ("vs_currency", vs_currency.to_string()),
             ("days", days.to_string()),
         ];
 
-        self.request_market_chart(url, query).await
+        let result = self.request_market_chart(url, query).await?;
+        
+        // Store in cache
+        self.api_cache.insert(cache_key, result.clone()).await;
+        
+        Ok(result)
     }
 
     /// Fetch historical market data for a specific time range.
@@ -305,7 +332,33 @@ impl PredictionSdk {
         horizon: ForecastHorizon,
         sentiment: Option<SentimentSnapshot>,
     ) -> Result<ForecastResult, PredictionError> {
-        match horizon {
+        // Check forecast cache first
+        let sentiment_hash = hash_sentiment(&sentiment);
+        
+        let cache_key = match horizon {
+            ForecastHorizon::Short(h) => ForecastCacheKey::Short {
+                asset_id: asset_id.to_string(),
+                vs_currency: vs_currency.to_string(),
+                horizon: h,
+                sentiment_hash,
+            },
+            ForecastHorizon::Long(h) => ForecastCacheKey::Long {
+                asset_id: asset_id.to_string(),
+                vs_currency: vs_currency.to_string(),
+                horizon: h,
+                sentiment_hash,
+            },
+        };
+
+        if let Some(cached) = self.forecast_cache.get(&cache_key).await {
+            return match cached {
+                ForecastCacheValue::Short(r) => Ok(ForecastResult::Short(r)),
+                ForecastCacheValue::Long(r) => Ok(ForecastResult::Long(r)),
+            };
+        }
+
+        // Cache miss - compute forecast
+        let result = match horizon {
             ForecastHorizon::Short(short_horizon) => {
                 let history = self
                     .fetch_price_history(asset_id, vs_currency, SHORT_FORECAST_LOOKBACK_DAYS)
@@ -316,7 +369,7 @@ impl PredictionSdk {
                         ForecastHorizon::Short(short_horizon),
                         sentiment,
                     )
-                    .await
+                    .await?
             }
             ForecastHorizon::Long(long_horizon) => {
                 let now = Utc::now();
@@ -331,9 +384,18 @@ impl PredictionSdk {
                         ForecastHorizon::Long(long_horizon),
                         sentiment,
                     )
-                    .await
+                    .await?
             }
-        }
+        };
+
+        // Store in forecast cache
+        let cache_value = match &result {
+            ForecastResult::Short(r) => ForecastCacheValue::Short(r.clone()),
+            ForecastResult::Long(r) => ForecastCacheValue::Long(r.clone()),
+        };
+        self.forecast_cache.insert(cache_key, cache_value).await;
+
+        Ok(result)
     }
 
     async fn request_market_chart(
