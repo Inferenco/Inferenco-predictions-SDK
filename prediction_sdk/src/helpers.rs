@@ -75,6 +75,10 @@ pub(crate) fn calculate_volatility(prices: &[PricePoint]) -> Result<f64, Predict
         return Err(PredictionError::InsufficientData);
     }
 
+    if returns.len() < 2 {
+        return Ok(0.0);
+    }
+
     Ok(returns.std_dev())
 }
 

@@ -138,6 +138,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## How to use the SDK in your own project
+
+1. **Add the dependency** – in your `Cargo.toml`, include:
+
+   ```toml
+   [dependencies]
+   prediction_sdk = { path = "./prediction_sdk" }
+   ```
+
+   When publishing to crates.io, replace the `path` reference with the released version number.
+
+2. **Choose your horizon** – select a `ForecastHorizon` variant that matches your use case:
+
+   - Intraday signals: `ForecastHorizon::Short(ShortForecastHorizon::FifteenMinutes | OneHour | FourHours)`.
+   - Tactical to strategic views: `ForecastHorizon::Long(LongForecastHorizon::OneDay` through `FourYears`).
+
+3. **Fetch history (or let the SDK do it)** – call `fetch_price_history`/`fetch_price_history_range` yourself if you want to cache data, or use `forecast_with_fetch` to let the SDK pull the required lookback automatically.
+
+4. **Provide optional sentiment** – pass a `SentimentSnapshot` with normalized `news_score` and `social_score` when you want to bias forecasts toward positive or negative momentum. Omit it to use a neutral weighting.
+
+5. **Run the forecast** – call `forecast` when you have history in memory, or `forecast_with_fetch` to combine fetching + forecasting in one step. The return value is a `ForecastResult` enum that matches the horizon type.
+
+6. **Integrate with MCP or your service** – the `run_prediction_handler` helper accepts a `ForecastRequest`, fetches the correct lookback for the requested horizon, and returns serialized JSON. This is the easiest hook for MCP tool commands or lightweight HTTP endpoints.
+
 See `handler::run_prediction_handler` for a ready-made orchestration function that bundles the above steps for typical MCP tools or CLI entry points. It accepts a `ForecastRequest` containing the asset ID, `vs_currency`, target horizon, and optional sentiment snapshot, fetches the appropriate price history (using the range API for long horizons), and dispatches to the correct forecast method before returning JSON.
 
 ### Selecting between `days` and `range`
