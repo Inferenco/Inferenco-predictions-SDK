@@ -97,7 +97,7 @@ pub(crate) fn run_monte_carlo(
         for _ in 0..days {
             let z: f64 = rng.sample(StandardNormal);
             let step = drift - (volatility.powi(2) / 2.0) + volatility * z;
-            price *= (1.0 + step).max(0.01);
+            price *= step.exp();
         }
         outcomes.push(price);
     }
@@ -129,7 +129,7 @@ fn returns_mean(prices: &[PricePoint]) -> Result<f64, PredictionError> {
         if previous <= 0.0 || current <= 0.0 {
             return Err(PredictionError::InsufficientData);
         }
-        returns.push((current / previous) - 1.0);
+        returns.push((current / previous).ln());
     }
     Ok(returns.mean())
 }
