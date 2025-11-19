@@ -27,7 +27,7 @@ prediction_sdk/
 1. **Market data ingestion** – `PredictionSdk::fetch_price_history` hits `https://api.coingecko.com/api/v3/coins/{id}/market_chart`, deserializes prices + volumes, and converts timestamps with `chrono`.
 2. **Short-horizon signal** – `run_short_forecast` slices a rolling window, computes moving average + volatility, optionally weights the result with `SentimentSnapshot`, and reports `ForecastDecomposition` plus normalized confidence.
 3. **Long-horizon simulation** – `run_long_forecast` derives the requested duration, executes Monte Carlo paths via `helpers::run_monte_carlo`, aggregates percentiles and mean, then applies optional sentiment weighting.
-4. **Handler orchestration** – `handler::run_prediction_handler` demonstrates how to wire everything together: instantiate the SDK, fetch 30 days of history, and produce one short + one long forecast tuple.
+4. **Handler orchestration** – `handler::run_prediction_handler` demonstrates how to wire everything together: instantiate the SDK, fetch horizon-specific history (30-day lookback for short windows, explicit ranges for long ones), run the matching forecast, and return a single serialized result.
 
 ## Prerequisites
 
@@ -138,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See `handler::run_prediction_handler` for a ready-made orchestration function that bundles the above steps for typical MCP tools or CLI entry points.
+See `handler::run_prediction_handler` for a ready-made orchestration function that bundles the above steps for typical MCP tools or CLI entry points. It accepts a `ForecastRequest` containing the asset ID, `vs_currency`, target horizon, and optional sentiment snapshot, fetches the appropriate price history (using the range API for long horizons), and dispatches to the correct forecast method before returning JSON.
 
 ### Selecting between `days` and `range`
 
@@ -171,7 +171,7 @@ With these guidelines, the Inferenco Predictions SDK can power MCP tools, backen
 
 ```json
 {
-  "token_id": "bitcoin",
+  "asset_id": "bitcoin",
   "vs_currency": "usd",
   "horizon": { "type": "short", "value": "one_hour" },
   "sentiment": { "news_score": 0.1, "social_score": -0.05 }

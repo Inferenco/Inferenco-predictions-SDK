@@ -59,9 +59,9 @@ pub enum ForecastResult {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ForecastRequest {
-    pub token_id: String,
-    pub horizon: ForecastHorizon,
+    pub asset_id: String,
     pub vs_currency: String,
+    pub horizon: ForecastHorizon,
     pub sentiment: Option<SentimentSnapshot>,
 }
 
