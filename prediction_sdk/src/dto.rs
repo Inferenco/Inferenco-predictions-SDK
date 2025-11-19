@@ -10,6 +10,7 @@ pub struct PricePoint {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ShortForecastHorizon {
     FifteenMinutes,
     OneHour,
@@ -40,6 +41,21 @@ pub struct ForecastDecomposition {
 pub struct SentimentSnapshot {
     pub news_score: f64,
     pub social_score: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum ForecastHorizon {
+    Short(ShortForecastHorizon),
+    Long(LongForecastHorizon),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ForecastRequest {
+    pub token_id: String,
+    pub horizon: ForecastHorizon,
+    pub vs_currency: String,
+    pub sentiment: Option<SentimentSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
