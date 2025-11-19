@@ -27,6 +27,18 @@ pub struct PredictionSdk {
 }
 
 impl PredictionSdk {
+    /// Construct an SDK client that uses the default CoinGecko base URL.
+    ///
+    /// The internal `reqwest::Client` uses default TLS and proxy settings. If
+    /// client construction fails, the [`PredictionError::Network`] variant is
+    /// returned.
+    ///
+    /// ```no_run
+    /// use prediction_sdk::PredictionSdk;
+    ///
+    /// let sdk = PredictionSdk::new()?;
+    /// # Ok::<(), prediction_sdk::PredictionError>(())
+    /// ```
     pub fn new() -> Result<Self, PredictionError> {
         let client = Client::builder()
             .build()
@@ -37,6 +49,19 @@ impl PredictionSdk {
         })
     }
 
+    /// Build an SDK with a pre-configured HTTP client and optional base URL.
+    ///
+    /// Use this constructor when you need to inject custom timeouts,
+    /// instrumentation, or a mock server URL during tests.
+    ///
+    /// ```no_run
+    /// use prediction_sdk::PredictionSdk;
+    /// use reqwest::Client;
+    ///
+    /// let client = Client::builder().timeout(std::time::Duration::from_secs(10)).build()?;
+    /// let sdk = PredictionSdk::with_client(client, None);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn with_client(client: Client, market_base_url: Option<String>) -> Self {
         let url = market_base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
         Self {
@@ -45,6 +70,15 @@ impl PredictionSdk {
         }
     }
 
+    /// Fetch historical market data for a specific window expressed in days.
+    ///
+    /// The `days` parameter controls the lookback period requested from
+    /// `/market_chart`. CoinGecko accepts either integer day counts or the
+    /// string `"max"`; this method uses `u32` to emphasize typical bounded
+    /// lookbacks.
+    ///
+    /// Errors are returned when the upstream call fails, times cannot be
+    /// converted, or the response payload cannot be deserialized.
     pub async fn fetch_price_history(
         &self,
         asset_id: &str,
@@ -60,6 +94,11 @@ impl PredictionSdk {
         self.request_market_chart(url, query).await
     }
 
+    /// Fetch historical market data for a specific time range.
+    ///
+    /// Timestamps must be provided in UTC. The upstream API expects Unix epoch
+    /// seconds; this method handles the conversion and surface any
+    /// deserialization or time conversion errors through [`PredictionError`].
     pub async fn fetch_price_history_range(
         &self,
         asset_id: &str,
@@ -80,6 +119,10 @@ impl PredictionSdk {
         self.request_market_chart(url, query).await
     }
 
+    /// Convenience alias for [`fetch_price_history_range`].
+    ///
+    /// Maintained for compatibility with existing call sites; both methods
+    /// produce identical results and errors.
     pub async fn fetch_market_chart_range(
         &self,
         id: &str,
@@ -92,6 +135,15 @@ impl PredictionSdk {
             .await
     }
 
+    /// Run a short-horizon forecast using pre-fetched price history.
+    ///
+    /// * `history` should contain at least the window length implied by the
+    ///   [`ShortForecastHorizon`] variant (typically recent intraday data).
+    /// * `sentiment` can be provided to nudge the forecast toward positive or
+    ///   negative momentum.
+    ///
+    /// Returns [`PredictionError::InsufficientData`] when the supplied history
+    /// cannot support the requested calculations.
     pub async fn run_short_forecast(
         &self,
         history: &[PricePoint],
@@ -118,6 +170,13 @@ impl PredictionSdk {
         })
     }
 
+    /// Run a long-horizon forecast using Monte Carlo simulation.
+    ///
+    /// Provide a sufficiently long history to span the selected horizon (for
+    /// example, a three-month horizon should be paired with multiple months of
+    /// data). Sentiment can be used to bias the resulting mean price. Returns
+    /// [`PredictionError::InsufficientData`] when the series cannot support the
+    /// simulation.
     pub async fn run_long_forecast(
         &self,
         history: &[PricePoint],
@@ -145,6 +204,13 @@ impl PredictionSdk {
         })
     }
 
+    /// Dispatch to the appropriate forecast algorithm using pre-fetched
+    /// history.
+    ///
+    /// Provide at least 30 days of data for [`ForecastHorizon::Short`]. Long
+    /// horizons should include enough history to cover the number of days
+    /// returned by `helpers::long_horizon_days` to avoid
+    /// [`PredictionError::InsufficientData`].
     pub async fn forecast(
         &self,
         history: &[PricePoint],
@@ -163,6 +229,17 @@ impl PredictionSdk {
         }
     }
 
+    /// Fetch the necessary history and produce a forecast in one call.
+    ///
+    /// * Short forecasts automatically pull the last 30 days of hourly data to
+    ///   satisfy the moving-average lookback requirements.
+    /// * Long forecasts derive their lookback window from the selected horizon
+    ///   (e.g., a three-month horizon uses a multi-month history window).
+    ///
+    /// Prefer [`forecast`] when you already possess cached history to avoid
+    /// duplicate network calls. Network errors, rate limits, deserialization
+    /// failures, and insufficient history propagate as [`PredictionError`]
+    /// variants.
     pub async fn forecast_with_fetch(
         &self,
         asset_id: &str,
