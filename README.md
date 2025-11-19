@@ -115,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let range_end = Utc::now();
     let range_start = range_end - Duration::days(180);
     let long_history = sdk
-        .fetch_market_chart_range("bitcoin", "usd", range_start, range_end)
+        .fetch_price_history_range("bitcoin", "usd", range_start, range_end)
         .await?;
     let long = sdk
         .forecast(
@@ -143,7 +143,7 @@ See `handler::run_prediction_handler` for a ready-made orchestration function th
 ### Selecting between `days` and `range`
 
 - **`fetch_price_history` (days-based)** – use this for short to medium lookbacks (e.g., 7–90 days) where a rolling number of days is sufficient and you prefer a concise request.
-- **`fetch_market_chart_range` (from/to)** – use this for long horizons or precise research windows. Pass explicit `DateTime<Utc>` bounds to make sure you capture exactly the lookback period required by your forecast horizon.
+- **`fetch_price_history_range` (from/to)** – use this for long horizons or precise research windows. Pass explicit `DateTime<Utc>` bounds to make sure you capture exactly the lookback period required by your forecast horizon. For compatibility, `fetch_market_chart_range` proxies to this method.
 
 ### Choosing a long-horizon forecast
 

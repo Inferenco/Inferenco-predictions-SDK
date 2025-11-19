@@ -60,16 +60,16 @@ impl PredictionSdk {
         self.request_market_chart(url, query).await
     }
 
-    pub async fn fetch_market_chart_range(
+    pub async fn fetch_price_history_range(
         &self,
-        id: &str,
+        asset_id: &str,
         vs_currency: &str,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<PricePoint>, PredictionError> {
         let url = format!(
             "{}/coins/{}/market_chart/range",
-            self.market_base_url, id
+            self.market_base_url, asset_id
         );
         let query = vec![
             ("vs_currency", vs_currency.to_string()),
@@ -78,6 +78,18 @@ impl PredictionSdk {
         ];
 
         self.request_market_chart(url, query).await
+    }
+
+    pub async fn fetch_market_chart_range(
+        &self,
+        id: &str,
+        vs_currency: &str,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<PricePoint>, PredictionError> {
+        self
+            .fetch_price_history_range(id, vs_currency, from, to)
+            .await
     }
 
     pub async fn run_short_forecast(
@@ -176,7 +188,7 @@ impl PredictionSdk {
                 let lookback_days = helpers::long_horizon_days(long_horizon);
                 let start = now - Duration::days(i64::from(lookback_days));
                 let history = self
-                    .fetch_market_chart_range(asset_id, vs_currency, start, now)
+                    .fetch_price_history_range(asset_id, vs_currency, start, now)
                     .await?;
                 self
                     .forecast(
