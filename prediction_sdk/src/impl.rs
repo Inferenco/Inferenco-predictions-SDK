@@ -268,3 +268,58 @@ fn build_price_points(payload: MarketChartResponse) -> Result<Vec<PricePoint>, P
 
     Ok(points)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+
+    fn build_sdk(server: &MockServer) -> PredictionSdk {
+        let client = Client::builder().build().unwrap();
+        PredictionSdk::with_client(client, Some(server.base_url()))
+    }
+
+    #[tokio::test]
+    async fn request_market_chart_handles_rate_limit() {
+        let server = MockServer::start_async().await;
+        let mock = server.mock_async(|when, then| {
+            when.method(GET)
+                .path("/coins/bitcoin/market_chart")
+                .query_param("vs_currency", "usd")
+                .query_param("days", "30");
+            then.status(429);
+        })
+        .await;
+
+        let sdk = build_sdk(&server);
+        let result = sdk
+            .fetch_price_history("bitcoin", "usd", 30)
+            .await
+            .unwrap_err();
+
+        mock.assert_async().await;
+        assert!(matches!(result, PredictionError::Network(message) if message.contains("rate limited")));
+    }
+
+    #[tokio::test]
+    async fn request_market_chart_handles_unexpected_status() {
+        let server = MockServer::start_async().await;
+        let mock = server.mock_async(|when, then| {
+            when.method(GET)
+                .path("/coins/bitcoin/market_chart")
+                .query_param("vs_currency", "usd")
+                .query_param("days", "30");
+            then.status(500);
+        })
+        .await;
+
+        let sdk = build_sdk(&server);
+        let result = sdk
+            .fetch_price_history("bitcoin", "usd", 30)
+            .await
+            .unwrap_err();
+
+        mock.assert_async().await;
+        assert!(matches!(result, PredictionError::Network(message) if message.contains("unexpected status")));
+    }
+}

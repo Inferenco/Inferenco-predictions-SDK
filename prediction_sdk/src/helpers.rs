@@ -161,3 +161,80 @@ pub(crate) fn decompose_series(prices: &[PricePoint]) -> Result<ForecastDecompos
         noise,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    fn sample_prices(count: usize, start_price: f64, step: f64) -> Vec<PricePoint> {
+        (0..count)
+            .map(|idx| PricePoint {
+                timestamp: Utc::now() - Duration::minutes(idx as i64),
+                price: start_price + step * idx as f64,
+                volume: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn run_monte_carlo_returns_constant_when_no_volatility() {
+        let history = vec![
+            PricePoint {
+                timestamp: Utc::now(),
+                price: 100.0,
+                volume: None,
+            },
+            PricePoint {
+                timestamp: Utc::now() + Duration::minutes(1),
+                price: 100.0,
+                volume: None,
+            },
+        ];
+
+        let result = run_monte_carlo(&history, 3, 5).unwrap();
+
+        assert_eq!(result, vec![100.0; 5]);
+    }
+
+    #[test]
+    fn run_monte_carlo_produces_expected_count() {
+        let history = sample_prices(10, 100.0, 1.0);
+
+        let result = run_monte_carlo(&history, 2, 8).unwrap();
+
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn percentile_sorts_and_selects_value() {
+        let values = vec![5.0, 1.0, 3.0, 2.0, 4.0];
+
+        let p50 = percentile(values, 0.5).unwrap();
+
+        assert_eq!(p50, 3.0);
+    }
+
+    #[test]
+    fn percentile_errors_on_empty_input() {
+        let result = percentile(Vec::new(), 0.9);
+
+        assert!(matches!(result, Err(PredictionError::InsufficientData)));
+    }
+
+    #[test]
+    fn horizon_to_lookback_mapping_matches_expected() {
+        assert_eq!(short_horizon_window(ShortForecastHorizon::FifteenMinutes), 16);
+        assert_eq!(short_horizon_window(ShortForecastHorizon::OneHour), 48);
+        assert_eq!(short_horizon_window(ShortForecastHorizon::FourHours), 96);
+
+        assert_eq!(long_horizon_days(LongForecastHorizon::OneDay), 1);
+        assert_eq!(long_horizon_days(LongForecastHorizon::ThreeDays), 3);
+        assert_eq!(long_horizon_days(LongForecastHorizon::OneWeek), 7);
+        assert_eq!(long_horizon_days(LongForecastHorizon::OneMonth), 30);
+        assert_eq!(long_horizon_days(LongForecastHorizon::ThreeMonths), 90);
+        assert_eq!(long_horizon_days(LongForecastHorizon::SixMonths), 180);
+        assert_eq!(long_horizon_days(LongForecastHorizon::OneYear), 360);
+        assert_eq!(long_horizon_days(LongForecastHorizon::FourYears), 1440);
+    }
+}
