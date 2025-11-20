@@ -39,6 +39,13 @@ fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64
         .map(|row| row.len())
         .unwrap_or_default();
 
+    if raw_features
+        .iter()
+        .any(|row| row.len() != feature_count || feature_count == 0)
+    {
+        return Vec::new();
+    }
+
     let mut columns: Vec<Vec<f64>> = vec![Vec::with_capacity(raw_features.len()); feature_count];
     for row in raw_features {
         for (col_idx, value) in row.iter().enumerate() {
@@ -93,37 +100,77 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
         return Err(PredictionError::InsufficientData);
     }
 
-    // Feature Engineering:
-    // X = [Price(t-1), Price(t-2), RSI(t-1), Volatility(t-1)]
-    // y = Price(t)
-
     let mut x_train = Vec::new();
     let mut y_train = Vec::new();
+    let mut price_returns = Vec::new();
 
     // We need a window to compute indicators before we can start training
     let lookback = 14;
     let mut rsi =
         RelativeStrengthIndex::new(lookback).map_err(|_| PredictionError::InsufficientData)?;
+    let mut bb = BollingerBands::new(20, 2.0).map_err(|_| PredictionError::InsufficientData)?;
+    let mut ema_short =
+        ExponentialMovingAverage::new(12).map_err(|_| PredictionError::InsufficientData)?;
+    let mut ema_long =
+        ExponentialMovingAverage::new(26).map_err(|_| PredictionError::InsufficientData)?;
+
+    let mut previous_macd = 0.0;
 
     // Pre-warm indicators
     for point in history.iter().take(lookback) {
         rsi.next(point.price);
+        let _ = bb.next(point.price);
+        let _ = ema_short.next(point.price);
+        let _ = ema_long.next(point.price);
     }
 
     for i in lookback..history.len() - 1 {
         let prev_price = history[i].price;
         let prev_prev_price = history[i - 1].price;
         let current_rsi = rsi.next(prev_price);
-
-        // Simple features: Lagged prices and RSI
-        // Note: In a real "best ever" system, we'd normalize these features (e.g. log returns, z-scores)
-        // For this implementation, we'll use raw values but SVR might struggle with unscaled data.
-        // Let's switch to log-returns for better ML stability.
+        let bb_out = bb.next(prev_price);
+        let bb_width = (bb_out.upper - bb_out.lower) / bb_out.average;
+        let short = ema_short.next(prev_price);
+        let long = ema_long.next(prev_price);
+        let macd = short - long;
+        let macd_slope = macd - previous_macd;
+        previous_macd = macd;
 
         let log_return_1 = (prev_price / prev_prev_price).ln();
         let log_return_2 = (history[i - 1].price / history[i - 2].price).ln();
 
-        x_train.push(vec![log_return_1, log_return_2, current_rsi / 100.0]);
+        price_returns.push(log_return_1);
+        let volatility_window_start = price_returns
+            .len()
+            .saturating_sub(ROLLING_STANDARDIZATION_WINDOW);
+        let volatility_slice = &price_returns[volatility_window_start..];
+        let (_, vol_std_dev) = rolling_stats(
+            volatility_slice,
+            volatility_slice.len().saturating_sub(1),
+            ROLLING_STANDARDIZATION_WINDOW,
+        );
+        let volatility = if vol_std_dev.abs() < f64::EPSILON {
+            1e-6
+        } else {
+            vol_std_dev
+        };
+
+        let raw_volume = history[i].volume.unwrap_or(0.0).max(0.0);
+        let log_volume = (raw_volume + 1.0).ln();
+        let volume_volatility_ratio = raw_volume / volatility;
+
+        let trend_strength = (macd.abs() / prev_price) * 100.0;
+
+        x_train.push(vec![
+            log_return_1,
+            log_return_2,
+            current_rsi / 100.0,
+            log_volume,
+            volume_volatility_ratio,
+            bb_width,
+            macd_slope,
+            trend_strength,
+        ]);
 
         let target_return = (history[i + 1].price / prev_price).ln();
         y_train.push(target_return);
@@ -177,11 +224,26 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
     }
     mae /= validation_y.len() as f64;
 
+    let mut baseline_mae = 0.0;
+    for (idx, actual) in validation_y.iter().enumerate() {
+        if let Some(features) = x_train.get(split_idx + idx) {
+            let naive = *features.get(0).unwrap_or(&0.0);
+            baseline_mae += (naive - actual).abs();
+        }
+    }
+    baseline_mae /= validation_y.len() as f64;
+
     if !mae.is_finite() {
         return Err(PredictionError::InsufficientData);
     }
 
-    let reliability = (1.0 / (1.0 + mae * 50.0)).clamp(0.0, 1.0) as f32;
+    let improvement = if mae > f64::EPSILON {
+        (baseline_mae / mae).clamp(0.5, 2.0)
+    } else {
+        1.0
+    };
+    let error_scale = (45.0 / improvement).max(10.0);
+    let reliability = (1.0 / (1.0 + mae * error_scale)).clamp(0.0, 1.0) as f32;
 
     let full_matrix = DenseMatrix::from_2d_vec(&standardized_features);
     let full_model = SVR::fit(&full_matrix, &y_train, &params)
@@ -195,12 +257,48 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
     let last_log_ret = (last_price / prev_last_price).ln();
     let prev_last_log_ret = (prev_last_price / history[last_idx - 2].price).ln();
     let last_rsi = rsi.next(last_price) / 100.0;
+    let last_bb_out = bb.next(last_price);
+    let last_bb_width = (last_bb_out.upper - last_bb_out.lower) / last_bb_out.average;
+    let last_short = ema_short.next(last_price);
+    let last_long = ema_long.next(last_price);
+    let last_macd = last_short - last_long;
+    let last_macd_slope = last_macd - previous_macd;
+    let last_trend_strength = (last_macd.abs() / last_price) * 100.0;
+
+    price_returns.push(last_log_ret);
+    let volatility_window_start = price_returns
+        .len()
+        .saturating_sub(ROLLING_STANDARDIZATION_WINDOW);
+    let volatility_slice = &price_returns[volatility_window_start..];
+    let (_, vol_std_dev) = rolling_stats(
+        volatility_slice,
+        volatility_slice.len().saturating_sub(1),
+        ROLLING_STANDARDIZATION_WINDOW,
+    );
+    let volatility = if vol_std_dev.abs() < f64::EPSILON {
+        1e-6
+    } else {
+        vol_std_dev
+    };
+
+    let last_volume = history[last_idx].volume.unwrap_or(0.0).max(0.0);
+    let last_log_volume = (last_volume + 1.0).ln();
+    let last_volume_ratio = last_volume / volatility;
 
     let columns: Vec<Vec<f64>> = (0..x_train[0].len())
         .map(|col_idx| x_train.iter().map(|row| row[col_idx]).collect())
         .collect();
     let standardized_row = standardize_row(
-        &[last_log_ret, prev_last_log_ret, last_rsi],
+        &[
+            last_log_ret,
+            prev_last_log_ret,
+            last_rsi,
+            last_log_volume,
+            last_volume_ratio,
+            last_bb_width,
+            last_macd_slope,
+            last_trend_strength,
+        ],
         &columns,
         ROLLING_STANDARDIZATION_WINDOW,
     );
