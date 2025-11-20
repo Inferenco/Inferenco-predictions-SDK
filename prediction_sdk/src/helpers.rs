@@ -115,6 +115,7 @@ pub(crate) fn calculate_moving_average(
     Ok(sum / window as f64)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn calculate_volatility(prices: &[PricePoint]) -> Result<f64, PredictionError> {
     if prices.len() < 2 {
         return Err(PredictionError::InsufficientData);
