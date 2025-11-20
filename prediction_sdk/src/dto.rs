@@ -76,6 +76,9 @@ pub struct TechnicalSignals {
 pub struct MlForecast {
     pub predicted_price: f64,
     pub reliability: f32,
+    pub predicted_return: f64,
+    pub lower_return: f64,
+    pub upper_return: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -138,6 +141,10 @@ pub struct ShortForecastResult {
     pub ml_prediction: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_reliability: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_return_bounds: Option<(f64, f64)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_price_interval: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

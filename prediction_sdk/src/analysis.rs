@@ -5,6 +5,7 @@ use ta::Next;
 use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex};
 
 use crate::dto::{MlForecast, PredictionError, PricePoint, TechnicalSignals};
+use crate::helpers;
 
 const ROLLING_STANDARDIZATION_WINDOW: usize = 20;
 
@@ -215,12 +216,15 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
         PredictionError::Serialization(format!("ML validation failed: {}", e))
     })?;
 
+    let mut residuals = Vec::with_capacity(validation_y.len());
     let mut mae = 0.0;
     for (predicted, actual) in validation_predictions
         .iter()
         .zip(validation_y.iter())
     {
-        mae += (predicted - actual).abs();
+        let residual = (predicted - actual).abs();
+        residuals.push(residual);
+        mae += residual;
     }
     mae /= validation_y.len() as f64;
 
@@ -233,7 +237,7 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
     }
     baseline_mae /= validation_y.len() as f64;
 
-    if !mae.is_finite() {
+    if residuals.is_empty() || !mae.is_finite() {
         return Err(PredictionError::InsufficientData);
     }
 
@@ -308,12 +312,19 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
         .predict(&x_new)
         .map_err(|e| PredictionError::Serialization(format!("ML prediction failed: {}", e)))?[0];
 
+    let conformal_quantile = helpers::percentile(residuals, 0.9)?;
+    let lower_return = predicted_log_return - conformal_quantile;
+    let upper_return = predicted_log_return + conformal_quantile;
+
     // Convert back to price
     let predicted_price = last_price * predicted_log_return.exp();
 
     Ok(MlForecast {
         predicted_price,
         reliability,
+        predicted_return: predicted_log_return,
+        lower_return,
+        upper_return,
     })
 }
 
