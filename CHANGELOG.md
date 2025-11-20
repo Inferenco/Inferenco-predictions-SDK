@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-11-20
+
+### Changed
+- **Unified Forecast Output**: Standardized output format for short and long-term forecasts, including consistent "Expected Price" and "AI Prediction" fields.
+- **Improved Confidence Scoring**: Tuned confidence scaling factor (reduced from 25.0 to 15.0) to provide more realistic scores for volatile assets.
+- **Batched History Ingestion**: Implemented `fetch_price_history_batched` to stitch together multiple 90-day chunks, allowing for longer historical context without hitting API limits.
+- **Optimized Lookback**: Adjusted `SHORT_FORECAST_LOOKBACK_DAYS` to 90 days to balance ML context with API usage.
+- **CI/CD Fixes**: Updated integration tests to correctly mock the `/market_chart/range` endpoint.
+
+### Added
+- **Individual Test Examples**: Added specific test files (`stohn_15m.rs` through `stohn_1y.rs`) for granular verification of different forecast horizons.
+- **AI Prediction for Long-Term**: Exposed the raw Monte Carlo mean as an "AI Prediction" for long-term forecasts.
+
 ## [0.1.0] - 2025-01-20
 
 ### Added
