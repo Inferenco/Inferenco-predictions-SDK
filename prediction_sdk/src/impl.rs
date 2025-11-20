@@ -286,8 +286,16 @@ impl PredictionSdk {
     ) -> Result<LongForecastResult, PredictionError> {
         let days = helpers::long_horizon_days(horizon);
         let simulations = helpers::scaled_simulation_count(days, DEFAULT_SIMULATIONS);
-        let (drift, volatility) = helpers::daily_return_stats(history)?;
-        let paths = helpers::run_monte_carlo(history, days, simulations, drift, volatility)?;
+        let (drift, _) = helpers::daily_return_stats(history)?;
+        let volatility_path = helpers::forecast_volatility_series(history, days)?;
+        let paths = helpers::run_monte_carlo(
+            history,
+            days,
+            simulations,
+            drift,
+            &volatility_path,
+            Some(0.02),
+        )?;
         let mean_price = paths.iter().sum::<f64>() / paths.len() as f64;
         let percentile_10 = helpers::percentile(paths.clone(), 0.1)?;
         let percentile_90 = helpers::percentile(paths, 0.9)?;

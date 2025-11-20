@@ -159,6 +159,17 @@ pub struct LongForecastResult {
     pub technical_signals: Option<TechnicalSignals>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MonteCarloBenchmark {
+    pub horizon_days: u32,
+    pub constant_mean: f64,
+    pub constant_percentile_10: f64,
+    pub constant_percentile_90: f64,
+    pub regime_mean: f64,
+    pub regime_percentile_10: f64,
+    pub regime_percentile_90: f64,
+}
+
 #[derive(Debug, Error)]
 /// Errors that can be returned by the SDK when fetching data or producing
 /// forecasts.

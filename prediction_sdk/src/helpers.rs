@@ -6,7 +6,7 @@ use statrs::statistics::Statistics;
 
 use crate::dto::{
     ForecastDecomposition, LongForecastHorizon, PredictionError, PricePoint, SentimentSnapshot,
-    ShortForecastHorizon,
+    MonteCarloBenchmark, ShortForecastHorizon,
 };
 
 pub(crate) fn short_horizon_window(horizon: ShortForecastHorizon) -> usize {
@@ -87,6 +87,53 @@ fn daily_log_returns(prices: &[PricePoint]) -> Result<Vec<f64>, PredictionError>
     Ok(returns)
 }
 
+fn variance(values: &[f64]) -> f64 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    values
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>()
+        / values.len() as f64
+}
+
+fn garch_parameters(returns: &[f64]) -> (f64, f64, f64) {
+    let alpha = 0.12_f64;
+    let beta = 0.83_f64;
+    let base_variance = variance(returns);
+    let floor = 1e-6;
+    let omega = (1.0_f64 - alpha - beta).max(floor) * base_variance.max(floor);
+
+    (omega, alpha, beta)
+}
+
+pub(crate) fn forecast_volatility_series(
+    prices: &[PricePoint],
+    steps: u32,
+) -> Result<Vec<f64>, PredictionError> {
+    let returns = daily_log_returns(prices)?;
+    if returns.len() < 2 {
+        return Err(PredictionError::InsufficientData);
+    }
+
+    let (omega, alpha, beta) = garch_parameters(&returns);
+    let mut sigma_squared = variance(&returns).max(1e-6);
+    let mut residual_squared = returns.last().map(|last| last.powi(2)).unwrap_or(0.0);
+
+    let mut path = Vec::with_capacity(steps as usize);
+    for _ in 0..steps {
+        sigma_squared = omega + alpha * residual_squared + beta * sigma_squared;
+        let sigma = sigma_squared.sqrt();
+        path.push(sigma);
+        residual_squared = 0.0;
+    }
+
+    Ok(path)
+}
+
 pub(crate) fn daily_return_stats(
     prices: &[PricePoint],
 ) -> Result<(f64, f64), PredictionError> {
@@ -135,25 +182,83 @@ pub(crate) fn run_monte_carlo(
     days: u32,
     simulations: usize,
     drift: f64,
-    volatility: f64,
+    volatility_path: &[f64],
+    mean_reversion: Option<f64>,
 ) -> Result<Vec<f64>, PredictionError> {
+    if volatility_path.len() < days as usize {
+        return Err(PredictionError::InsufficientData);
+    }
+
     let last_price = latest_price(prices)?;
     let mut rng = rand::thread_rng();
     let mut outcomes = Vec::with_capacity(simulations);
     let time_step = 1.0;
     for _ in 0..simulations {
         let mut price = last_price;
-        for _ in 0..days {
+        for day in 0..days as usize {
+            let volatility = *volatility_path
+                .get(day)
+                .ok_or(PredictionError::InsufficientData)?;
             let z: f64 = rng.sample(StandardNormal);
             let drift_component = (drift - (volatility.powi(2) / 2.0)) * time_step;
+            let reversion_adjustment = mean_reversion
+                .map(|kappa| kappa * ((last_price - price) / last_price))
+                .unwrap_or(0.0);
             let shock = volatility * time_step.sqrt() * z;
-            let step = drift_component + shock;
+            let step = drift_component + reversion_adjustment + shock;
             price *= step.exp();
         }
         outcomes.push(price);
     }
 
     Ok(outcomes)
+}
+
+pub(crate) fn monte_carlo_benchmark(
+    prices: &[PricePoint],
+    days: u32,
+    simulations: usize,
+    drift: f64,
+    mean_reversion: Option<f64>,
+) -> Result<MonteCarloBenchmark, PredictionError> {
+    let constant_volatility = calculate_volatility(prices)?;
+    let constant_path = vec![constant_volatility; days as usize];
+    let constant_runs = run_monte_carlo(
+        prices,
+        days,
+        simulations,
+        drift,
+        &constant_path,
+        mean_reversion,
+    )?;
+
+    let dynamic_volatility = forecast_volatility_series(prices, days)?;
+    let regime_runs = run_monte_carlo(
+        prices,
+        days,
+        simulations,
+        drift,
+        &dynamic_volatility,
+        mean_reversion,
+    )?;
+
+    let constant_mean = constant_runs.iter().sum::<f64>() / constant_runs.len() as f64;
+    let constant_percentile_10 = percentile(constant_runs.clone(), 0.1)?;
+    let constant_percentile_90 = percentile(constant_runs.clone(), 0.9)?;
+
+    let regime_mean = regime_runs.iter().sum::<f64>() / regime_runs.len() as f64;
+    let regime_percentile_10 = percentile(regime_runs.clone(), 0.1)?;
+    let regime_percentile_90 = percentile(regime_runs.clone(), 0.9)?;
+
+    Ok(MonteCarloBenchmark {
+        horizon_days: days,
+        constant_mean,
+        constant_percentile_10,
+        constant_percentile_90,
+        regime_mean,
+        regime_percentile_10,
+        regime_percentile_90,
+    })
 }
 
 pub(crate) fn percentile(mut values: Vec<f64>, pct: f64) -> Result<f64, PredictionError> {
@@ -262,7 +367,8 @@ mod tests {
         ];
 
         let (drift, volatility) = daily_return_stats(&history).unwrap();
-        let result = run_monte_carlo(&history, 3, 5, drift, volatility).unwrap();
+        let volatility_path = vec![volatility; 3];
+        let result = run_monte_carlo(&history, 3, 5, drift, &volatility_path, None).unwrap();
 
         assert_eq!(result, vec![100.0; 5]);
     }
@@ -273,7 +379,9 @@ mod tests {
 
         let (drift, volatility) = daily_return_stats(&history).unwrap();
 
-        let result = run_monte_carlo(&history, 2, 8, drift, volatility).unwrap();
+        let volatility_path = vec![volatility; 2];
+
+        let result = run_monte_carlo(&history, 2, 8, drift, &volatility_path, Some(0.01)).unwrap();
 
         assert_eq!(result.len(), 8);
     }
@@ -364,7 +472,29 @@ mod tests {
     #[test]
     fn run_monte_carlo_errors_on_insufficient_data() {
         let history = sample_prices(1, 100.0, 0.0);
-        let result = run_monte_carlo(&history, 5, 10, 0.0, 0.0);
+        let volatility_path = vec![0.0; 5];
+        let result = run_monte_carlo(&history, 5, 10, 0.0, &volatility_path, None);
         assert!(matches!(result, Err(PredictionError::InsufficientData)));
+    }
+
+    #[test]
+    fn forecast_volatility_series_uses_variance_floor() {
+        let history = sample_prices(5, 100.0, 0.0);
+        let result = forecast_volatility_series(&history, 4).unwrap();
+        assert_eq!(result.len(), 4);
+        assert!(result.iter().all(|sigma| *sigma >= 0.0));
+    }
+
+    #[test]
+    fn monte_carlo_benchmark_reports_bands() {
+        let history = sample_prices(20, 100.0, 1.0);
+        let (drift, _) = daily_return_stats(&history).unwrap();
+        let benchmark =
+            monte_carlo_benchmark(&history, 5, 12, drift, Some(0.02)).unwrap();
+
+        assert!(benchmark.constant_mean.is_finite());
+        assert!(benchmark.regime_mean.is_finite());
+        assert!(benchmark.constant_percentile_10 <= benchmark.constant_percentile_90);
+        assert!(benchmark.regime_percentile_10 <= benchmark.regime_percentile_90);
     }
 }
