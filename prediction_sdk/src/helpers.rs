@@ -37,6 +37,70 @@ pub(crate) fn scaled_simulation_count(days: u32, base: usize) -> usize {
     scaled.clamp(32, base)
 }
 
+fn ordered_history(prices: &[PricePoint]) -> Result<Vec<&PricePoint>, PredictionError> {
+    if prices.len() < 2 {
+        return Err(PredictionError::InsufficientData);
+    }
+
+    let mut ordered: Vec<&PricePoint> = prices.iter().collect();
+    ordered.sort_by_key(|point| point.timestamp);
+
+    Ok(ordered)
+}
+
+fn latest_price(prices: &[PricePoint]) -> Result<f64, PredictionError> {
+    let ordered = ordered_history(prices)?;
+
+    ordered
+        .last()
+        .map(|point| point.price)
+        .ok_or(PredictionError::InsufficientData)
+}
+
+fn daily_log_returns(prices: &[PricePoint]) -> Result<Vec<f64>, PredictionError> {
+    let ordered = ordered_history(prices)?;
+    let mut returns = Vec::with_capacity(ordered.len() - 1);
+
+    for pair in ordered.windows(2) {
+        let previous = pair[0];
+        let current = pair[1];
+        if previous.price <= 0.0 || current.price <= 0.0 {
+            return Err(PredictionError::InsufficientData);
+        }
+
+        let delta = (current.timestamp - previous.timestamp)
+            .to_std()
+            .map_err(|_| PredictionError::InsufficientData)?;
+        let delta_days = delta.as_secs_f64() / 86_400.0;
+        if delta_days <= f64::EPSILON {
+            return Err(PredictionError::InsufficientData);
+        }
+
+        let ret = (current.price / previous.price).ln() / delta_days;
+        returns.push(ret);
+    }
+
+    if returns.is_empty() {
+        return Err(PredictionError::InsufficientData);
+    }
+
+    Ok(returns)
+}
+
+pub(crate) fn daily_return_stats(
+    prices: &[PricePoint],
+) -> Result<(f64, f64), PredictionError> {
+    let returns = daily_log_returns(prices)?;
+    let volatility = if returns.len() < 2 {
+        0.0
+    } else {
+        returns.clone().std_dev()
+    };
+    let drift = returns.mean();
+
+    Ok((drift, volatility))
+}
+
 pub(crate) fn calculate_moving_average(
     prices: &[PricePoint],
     window: usize,
@@ -56,20 +120,7 @@ pub(crate) fn calculate_volatility(prices: &[PricePoint]) -> Result<f64, Predict
         return Err(PredictionError::InsufficientData);
     }
 
-    let mut returns = Vec::with_capacity(prices.len() - 1);
-    for pair in prices.windows(2) {
-        let previous = pair[0].price;
-        let current = pair[1].price;
-        if previous <= 0.0 || current <= 0.0 {
-            return Err(PredictionError::InsufficientData);
-        }
-        let ret = (current / previous).ln();
-        returns.push(ret);
-    }
-
-    if returns.is_empty() {
-        return Err(PredictionError::InsufficientData);
-    }
+    let returns = daily_log_returns(prices)?;
 
     if returns.len() < 2 {
         return Ok(0.0);
@@ -82,24 +133,20 @@ pub(crate) fn run_monte_carlo(
     prices: &[PricePoint],
     days: u32,
     simulations: usize,
+    drift: f64,
+    volatility: f64,
 ) -> Result<Vec<f64>, PredictionError> {
-    let last_price = prices
-        .last()
-        .map(|p| p.price)
-        .ok_or(PredictionError::InsufficientData)?;
-    let volatility = calculate_volatility(prices)?;
-    if volatility <= f64::EPSILON {
-        return Ok(vec![last_price; simulations]);
-    }
-
-    let drift = returns_mean(prices)?;
+    let last_price = latest_price(prices)?;
     let mut rng = rand::thread_rng();
     let mut outcomes = Vec::with_capacity(simulations);
+    let time_step = 1.0;
     for _ in 0..simulations {
         let mut price = last_price;
         for _ in 0..days {
             let z: f64 = rng.sample(StandardNormal);
-            let step = drift - (volatility.powi(2) / 2.0) + volatility * z;
+            let drift_component = (drift - (volatility.powi(2) / 2.0)) * time_step;
+            let shock = volatility * time_step.sqrt() * z;
+            let step = drift_component + shock;
             price *= step.exp();
         }
         outcomes.push(price);
@@ -119,22 +166,6 @@ pub(crate) fn percentile(mut values: Vec<f64>, pct: f64) -> Result<f64, Predicti
         .get(idx.min(len - 1))
         .copied()
         .ok_or(PredictionError::InsufficientData)
-}
-
-fn returns_mean(prices: &[PricePoint]) -> Result<f64, PredictionError> {
-    if prices.len() < 2 {
-        return Err(PredictionError::InsufficientData);
-    }
-    let mut returns = Vec::with_capacity(prices.len() - 1);
-    for pair in prices.windows(2) {
-        let previous = pair[0].price;
-        let current = pair[1].price;
-        if previous <= 0.0 || current <= 0.0 {
-            return Err(PredictionError::InsufficientData);
-        }
-        returns.push((current / previous).ln());
-    }
-    Ok(returns.mean())
 }
 
 pub(crate) fn weight_with_sentiment(value: f64, sentiment: &SentimentSnapshot) -> f64 {
@@ -197,7 +228,8 @@ mod tests {
             },
         ];
 
-        let result = run_monte_carlo(&history, 3, 5).unwrap();
+        let (drift, volatility) = daily_return_stats(&history).unwrap();
+        let result = run_monte_carlo(&history, 3, 5, drift, volatility).unwrap();
 
         assert_eq!(result, vec![100.0; 5]);
     }
@@ -206,9 +238,39 @@ mod tests {
     fn run_monte_carlo_produces_expected_count() {
         let history = sample_prices(10, 100.0, 1.0);
 
-        let result = run_monte_carlo(&history, 2, 8).unwrap();
+        let (drift, volatility) = daily_return_stats(&history).unwrap();
+
+        let result = run_monte_carlo(&history, 2, 8, drift, volatility).unwrap();
 
         assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn time_scaled_returns_respect_elapsed_intervals() {
+        let start = Utc::now() - Duration::hours(24);
+        let history = vec![
+            PricePoint {
+                timestamp: start,
+                price: 100.0,
+                volume: None,
+            },
+            PricePoint {
+                timestamp: start + Duration::hours(12),
+                price: 110.0,
+                volume: None,
+            },
+            PricePoint {
+                timestamp: start + Duration::hours(24),
+                price: 121.0,
+                volume: None,
+            },
+        ];
+
+        let (drift, volatility) = daily_return_stats(&history).unwrap();
+        let expected_drift = (1.1_f64.ln()) / 0.5;
+
+        assert!((drift - expected_drift).abs() < 1e-6);
+        assert!(volatility.abs() < f64::EPSILON);
     }
 
     #[test]
@@ -269,7 +331,7 @@ mod tests {
     #[test]
     fn run_monte_carlo_errors_on_insufficient_data() {
         let history = sample_prices(1, 100.0, 0.0);
-        let result = run_monte_carlo(&history, 5, 10);
+        let result = run_monte_carlo(&history, 5, 10, 0.0, 0.0);
         assert!(matches!(result, Err(PredictionError::InsufficientData)));
     }
 }
