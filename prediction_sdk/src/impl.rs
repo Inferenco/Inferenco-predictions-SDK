@@ -236,10 +236,16 @@ impl PredictionSdk {
             }
         };
 
-        // Ensemble: If ML is available, blend it with the statistical forecast
-        if let Some(ml_price) = ml_prediction {
-            // Simple 50/50 blend for now, or weighted by confidence
-            expected_price = (expected_price + ml_price) / 2.0;
+        let baseline_expected = expected_price;
+
+        if let Some(ml) = ml_prediction.as_ref() {
+            let reliability = f64::from(ml.reliability);
+            if reliability >= 0.1 {
+                expected_price = baseline_expected * (1.0 - reliability)
+                    + ml.predicted_price * reliability;
+            } else {
+                expected_price = baseline_expected;
+            }
         }
 
         Ok(ShortForecastResult {
@@ -248,7 +254,8 @@ impl PredictionSdk {
             confidence,
             decomposition,
             technical_signals,
-            ml_prediction,
+            ml_prediction: ml_prediction.as_ref().map(|ml| ml.predicted_price),
+            ml_reliability: ml_prediction.map(|ml| ml.reliability),
         })
     }
 
