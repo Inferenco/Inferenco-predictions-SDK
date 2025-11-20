@@ -20,9 +20,10 @@ async fn forecast_with_fetch_handles_short_horizon() {
     let mock = server
         .mock_async(|when, then| {
             when.method(GET)
-                .path("/coins/bitcoin/market_chart")
+                .path("/coins/bitcoin/market_chart/range")
                 .query_param("vs_currency", "usd")
-                .query_param("days", "30");
+                .query_param_exists("from")
+                .query_param_exists("to");
             then.status(200)
                 .header("content-type", "application/json")
                 .json_body_obj(&serde_json::json!({ "prices": prices, "total_volumes": [] }));
@@ -50,6 +51,7 @@ async fn forecast_with_fetch_handles_short_horizon() {
             // Verify advanced features
             assert!(short.technical_signals.is_some());
             assert!(short.ml_prediction.is_some());
+            assert!(short.ml_reliability.is_some());
         }
         _ => panic!("expected short forecast"),
     }

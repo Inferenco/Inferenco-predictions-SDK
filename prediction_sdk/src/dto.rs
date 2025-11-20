@@ -73,6 +73,15 @@ pub struct TechnicalSignals {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MlForecast {
+    pub predicted_price: f64,
+    pub reliability: f32,
+    pub predicted_return: f64,
+    pub lower_return: f64,
+    pub upper_return: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 /// Wrapper for selecting either a short or long forecast horizon.
 ///
@@ -130,6 +139,12 @@ pub struct ShortForecastResult {
     pub technical_signals: Option<TechnicalSignals>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_prediction: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_reliability: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_return_bounds: Option<(f64, f64)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_price_interval: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -149,6 +164,19 @@ pub struct LongForecastResult {
     pub confidence: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub technical_signals: Option<TechnicalSignals>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_prediction: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MonteCarloBenchmark {
+    pub horizon_days: u32,
+    pub constant_mean: f64,
+    pub constant_percentile_10: f64,
+    pub constant_percentile_90: f64,
+    pub regime_mean: f64,
+    pub regime_percentile_10: f64,
+    pub regime_percentile_90: f64,
 }
 
 #[derive(Debug, Error)]
