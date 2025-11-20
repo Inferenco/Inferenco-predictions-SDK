@@ -250,11 +250,33 @@ impl PredictionSdk {
 
         let baseline_expected = expected_price;
 
+        let mut ml_return_bounds = None;
+        let mut ml_price_interval = None;
+
         if let Some(ml) = ml_prediction.as_ref() {
             let reliability = f64::from(ml.reliability);
-            if reliability >= 0.1 {
-                expected_price = baseline_expected * (1.0 - reliability)
-                    + ml.predicted_price * reliability;
+            let last_price = history
+                .last()
+                .map(|point| point.price)
+                .unwrap_or(baseline_expected);
+            let lower_price = last_price * ml.lower_return.exp();
+            let upper_price = last_price * ml.upper_return.exp();
+            let interval_width = (upper_price - lower_price).abs();
+            let price_scale = if last_price.abs() < f64::EPSILON {
+                1.0
+            } else {
+                last_price.abs()
+            };
+            let relative_width = interval_width / price_scale;
+            let width_penalty = 1.0 / (1.0 + relative_width);
+            let weight = (reliability * width_penalty).clamp(0.0, 1.0);
+
+            ml_return_bounds = Some((ml.lower_return, ml.upper_return));
+            ml_price_interval = Some((lower_price, upper_price));
+
+            if reliability >= 0.1 && weight > 0.0 {
+                expected_price = baseline_expected * (1.0 - weight)
+                    + ml.predicted_price * weight;
             } else {
                 expected_price = baseline_expected;
             }
@@ -267,7 +289,9 @@ impl PredictionSdk {
             decomposition,
             technical_signals,
             ml_prediction: ml_prediction.as_ref().map(|ml| ml.predicted_price),
-            ml_reliability: ml_prediction.map(|ml| ml.reliability),
+            ml_reliability: ml_prediction.as_ref().map(|ml| ml.reliability),
+            ml_return_bounds,
+            ml_price_interval,
         })
     }
 
