@@ -46,6 +46,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         if let ForecastResult::Short(res) = short_result {
             println!("      💰 Expected Price: ${:.2}", res.expected_price);
+            if let Some((lower, upper)) = res.ml_price_interval {
+                println!("      📉 Bearish (10th): ${:.2}", lower);
+                println!("      📈 Bullish (90th): ${:.2}", upper);
+            }
             println!("      🎯 Confidence: {:.1}%", res.confidence * 100.0);
 
             if let Some(ml_price) = res.ml_prediction {
@@ -74,10 +78,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .await?;
 
         if let ForecastResult::Long(res) = long_result {
-            println!("      💰 Mean Price: ${:.2}", res.mean_price);
+            println!("      💰 Expected Price: ${:.2}", res.mean_price);
             println!("      📉 Bearish (10th): ${:.2}", res.percentile_10);
             println!("      📈 Bullish (90th): ${:.2}", res.percentile_90);
             println!("      🎯 Confidence: {:.1}%", res.confidence * 100.0);
+
+            if let Some(ml_price) = res.ml_prediction {
+                println!("      🤖 AI Prediction: ${:.2}", ml_price);
+            }
         }
     }
 

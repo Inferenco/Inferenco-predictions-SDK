@@ -212,16 +212,13 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
         .map_err(|e| PredictionError::Serialization(format!("ML training failed: {}", e)))?;
 
     let validation_matrix = DenseMatrix::from_2d_vec(&validation_x.to_vec());
-    let validation_predictions = trained_model.predict(&validation_matrix).map_err(|e| {
-        PredictionError::Serialization(format!("ML validation failed: {}", e))
-    })?;
+    let validation_predictions = trained_model
+        .predict(&validation_matrix)
+        .map_err(|e| PredictionError::Serialization(format!("ML validation failed: {}", e)))?;
 
     let mut residuals = Vec::with_capacity(validation_y.len());
     let mut mae = 0.0;
-    for (predicted, actual) in validation_predictions
-        .iter()
-        .zip(validation_y.iter())
-    {
+    for (predicted, actual) in validation_predictions.iter().zip(validation_y.iter()) {
         let residual = (predicted - actual).abs();
         residuals.push(residual);
         mae += residual;
@@ -231,7 +228,7 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
     let mut baseline_mae = 0.0;
     for (idx, actual) in validation_y.iter().enumerate() {
         if let Some(features) = x_train.get(split_idx + idx) {
-            let naive = *features.get(0).unwrap_or(&0.0);
+            let naive = *features.first().unwrap_or(&0.0);
             baseline_mae += (naive - actual).abs();
         }
     }

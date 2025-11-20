@@ -5,8 +5,8 @@ use rand_distr::StandardNormal;
 use statrs::statistics::Statistics;
 
 use crate::dto::{
-    ForecastDecomposition, LongForecastHorizon, PredictionError, PricePoint, SentimentSnapshot,
-    MonteCarloBenchmark, ShortForecastHorizon,
+    ForecastDecomposition, LongForecastHorizon, MonteCarloBenchmark, PredictionError, PricePoint,
+    SentimentSnapshot, ShortForecastHorizon,
 };
 
 pub(crate) fn short_horizon_window(horizon: ShortForecastHorizon) -> usize {
@@ -134,9 +134,7 @@ pub(crate) fn forecast_volatility_series(
     Ok(path)
 }
 
-pub(crate) fn daily_return_stats(
-    prices: &[PricePoint],
-) -> Result<(f64, f64), PredictionError> {
+pub(crate) fn daily_return_stats(prices: &[PricePoint]) -> Result<(f64, f64), PredictionError> {
     let returns = daily_log_returns(prices)?;
     let volatility = if returns.len() < 2 {
         0.0
@@ -214,6 +212,7 @@ pub(crate) fn run_monte_carlo(
     Ok(outcomes)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn monte_carlo_benchmark(
     prices: &[PricePoint],
     days: u32,
@@ -301,10 +300,7 @@ pub(crate) fn decompose_series(
     let mean_x = indices.iter().copied().sum::<f64>() / count as f64;
     let mean_y = price_values.iter().copied().sum::<f64>() / count as f64;
 
-    let denominator: f64 = indices
-        .iter()
-        .map(|x| (x - mean_x).powi(2))
-        .sum();
+    let denominator: f64 = indices.iter().map(|x| (x - mean_x).powi(2)).sum();
     let slope = if denominator.abs() < f64::EPSILON {
         0.0
     } else {
@@ -489,8 +485,7 @@ mod tests {
     fn monte_carlo_benchmark_reports_bands() {
         let history = sample_prices(20, 100.0, 1.0);
         let (drift, _) = daily_return_stats(&history).unwrap();
-        let benchmark =
-            monte_carlo_benchmark(&history, 5, 12, drift, Some(0.02)).unwrap();
+        let benchmark = monte_carlo_benchmark(&history, 5, 12, drift, Some(0.02)).unwrap();
 
         assert!(benchmark.constant_mean.is_finite());
         assert!(benchmark.regime_mean.is_finite());

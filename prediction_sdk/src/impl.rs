@@ -30,7 +30,7 @@ use crate::{
 
 const DEFAULT_BASE_URL: &str = "https://api.coingecko.com/api/v3";
 const DEFAULT_SIMULATIONS: usize = 256;
-const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
+const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 90;
 
 pub struct PredictionSdk {
     client: Client,
@@ -100,6 +100,49 @@ impl PredictionSdk {
             api_cache,
             forecast_cache,
         }
+    }
+
+    /// Fetch historical market data in batches to ensure high granularity (hourly) over long periods.
+    ///
+    /// The CoinGecko API downsamples data for long ranges (e.g., > 90 days). To get hourly data
+    /// for a full year, we fetch in 90-day chunks and stitch them together.
+    pub async fn fetch_price_history_batched(
+        &self,
+        asset_id: &str,
+        vs_currency: &str,
+        days: u32,
+    ) -> Result<Vec<PricePoint>, PredictionError> {
+        let mut all_points = Vec::new();
+        let now = Utc::now();
+        let chunk_size = 90;
+        let mut remaining_days = days;
+        let mut current_end = now;
+
+        // We loop backwards from now
+        while remaining_days > 0 {
+            let fetch_days = std::cmp::min(remaining_days, chunk_size);
+            let start = current_end - Duration::days(fetch_days as i64);
+
+            // Fetch the chunk
+            // Note: We might get slight overlaps or gaps depending on exact timing, but sorting/dedup handles it.
+            let chunk = self
+                .fetch_price_history_range(asset_id, vs_currency, start, current_end)
+                .await?;
+
+            all_points.extend(chunk);
+
+            // Move the window back
+            current_end = start;
+            remaining_days -= fetch_days;
+        }
+
+        // Sort by timestamp (ascending)
+        all_points.sort_by_key(|p| p.timestamp);
+
+        // Deduplicate based on timestamp
+        all_points.dedup_by_key(|p| p.timestamp);
+
+        Ok(all_points)
     }
 
     /// Fetch historical market data for a specific window expressed in days.
@@ -225,14 +268,34 @@ impl PredictionSdk {
             expected_price = helpers::weight_with_sentiment(expected_price, snapshot);
         }
 
+        // Calculate average interval for volatility scaling correction
+        let avg_interval_days = if recent_history.len() > 1 {
+            let start = recent_history.first().map(|p| p.timestamp.timestamp()).unwrap_or(0);
+            let end = recent_history.last().map(|p| p.timestamp.timestamp()).unwrap_or(0);
+            let seconds = (end - start) as f64;
+            (seconds / 86400.0) / (recent_history.len() - 1) as f64
+        } else {
+            1.0 / 24.0
+        };
+
+        // daily_return_stats returns volatility of the *rate*, which is sigma_daily * sqrt(1/dt).
+        // We want sigma_daily, so we multiply by sqrt(dt).
+        let adjusted_volatility = volatility * avg_interval_days.sqrt();
+
         let decomposition = helpers::decompose_series(recent_history)?;
+        let normalized_noise = if moving_average.abs() > f64::EPSILON {
+            decomposition.noise / moving_average
+        } else {
+            0.0
+        };
+
         // Use a sigmoid-like decay for confidence based on volatility.
         // High volatility -> Low confidence.
         // Low volatility -> High confidence.
         // Formula: 1.0 / (1.0 + scaling_factor * volatility * sqrt(time))
-        let scaling_factor = 12.0; // Tuned to balance short-horizon return regimes
+        let scaling_factor = 15.0; // Tuned to 15.0 to balance volatility sensitivity without being overly punitive
         let time_scaling = horizon_hours.sqrt();
-        let combined_uncertainty = 0.6 * volatility + 0.4 * decomposition.noise;
+        let combined_uncertainty = 0.6 * adjusted_volatility + 0.4 * normalized_noise;
         let confidence_value = 1.0 / (1.0 + scaling_factor * combined_uncertainty * time_scaling);
         let confidence = helpers::normalize_confidence(confidence_value);
 
@@ -318,7 +381,7 @@ impl PredictionSdk {
             simulations,
             drift,
             &volatility_path,
-            Some(0.02),
+            Some(0.005), // Reduced from 0.02 to avoid excessive bearish pull
         )?;
         let mean_price = paths.iter().sum::<f64>() / paths.len() as f64;
         let percentile_10 = helpers::percentile(paths.clone(), 0.1)?;
@@ -327,7 +390,16 @@ impl PredictionSdk {
         if let Some(snapshot) = sentiment.as_ref() {
             adjusted_mean = helpers::weight_with_sentiment(adjusted_mean, snapshot);
         }
-        let confidence = helpers::normalize_confidence(1.0 / (1.0 + days as f64));
+        let spread = percentile_90 - percentile_10;
+        let relative_spread = if adjusted_mean.abs() > f64::EPSILON {
+            spread / adjusted_mean
+        } else {
+            1.0
+        };
+        // Confidence is inversely proportional to the relative spread.
+        // A spread of 0% -> Confidence 1.0
+        // A spread of 100% -> Confidence 0.5
+        let confidence = helpers::normalize_confidence(1.0 / (1.0 + relative_spread));
 
         // Calculate technical signals (still useful for long horizons as a starting point)
         let technical_signals = analysis::calculate_technical_signals(history).ok();
@@ -339,6 +411,7 @@ impl PredictionSdk {
             percentile_90,
             confidence,
             technical_signals,
+            ml_prediction: Some(mean_price),
         })
     }
 
@@ -414,7 +487,7 @@ impl PredictionSdk {
         let result = match horizon {
             ForecastHorizon::Short(short_horizon) => {
                 let history = self
-                    .fetch_price_history(asset_id, vs_currency, SHORT_FORECAST_LOOKBACK_DAYS)
+                    .fetch_price_history_batched(asset_id, vs_currency, SHORT_FORECAST_LOOKBACK_DAYS)
                     .await?;
                 self
                     .forecast(
@@ -440,6 +513,7 @@ impl PredictionSdk {
                     .await?
             }
         };
+
 
         // Store in forecast cache
         let cache_value = match &result {

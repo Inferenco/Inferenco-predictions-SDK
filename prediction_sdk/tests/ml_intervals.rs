@@ -1,7 +1,5 @@
 use chrono::{Duration, Utc};
-use prediction_sdk::{
-    analysis, PredictionSdk, PricePoint, ShortForecastHorizon,
-};
+use prediction_sdk::{PredictionSdk, PricePoint, ShortForecastHorizon, analysis};
 
 fn exponential_history(count: usize, step: f64) -> Vec<PricePoint> {
     let start = Utc::now() - Duration::minutes(count as i64);
@@ -85,8 +83,8 @@ async fn conformal_intervals_cover_synthetic_returns() {
     let mut total = 0usize;
 
     for idx in 50..history.len() - 1 {
-        let forecast = analysis::predict_next_price_ml(&history[..idx])
-            .expect("ML forecast should succeed");
+        let forecast =
+            analysis::predict_next_price_ml(&history[..idx]).expect("ML forecast should succeed");
         let actual_return = (history[idx].price / history[idx - 1].price).ln();
         if actual_return >= forecast.lower_return && actual_return <= forecast.upper_return {
             covered += 1;
@@ -133,6 +131,9 @@ async fn wide_intervals_downweight_ml_blending() {
     let relative_width = interval_width / price_interval.0.max(price_interval.1).abs();
 
     assert!(weight_inferred >= 0.0);
-    assert!(relative_width > 0.05, "interval too narrow to test weighting");
+    assert!(
+        relative_width > 0.05,
+        "interval too narrow to test weighting"
+    );
     assert!(weight_inferred < f64::from(ml_reliability));
 }

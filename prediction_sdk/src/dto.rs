@@ -164,6 +164,8 @@ pub struct LongForecastResult {
     pub confidence: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub technical_signals: Option<TechnicalSignals>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_prediction: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
