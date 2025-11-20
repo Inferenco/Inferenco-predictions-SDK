@@ -211,8 +211,16 @@ impl PredictionSdk {
         }
         let recent_history = &history[history.len() - recent_len..];
 
-        let volatility = helpers::calculate_volatility(recent_history)?;
-        let mut expected_price = moving_average + volatility * 0.1;
+        let (drift, volatility) = helpers::daily_return_stats(recent_history)?;
+
+        let horizon_hours: f64 = match horizon {
+            ShortForecastHorizon::FifteenMinutes => 0.25,
+            ShortForecastHorizon::OneHour => 1.0,
+            ShortForecastHorizon::FourHours => 4.0,
+        };
+
+        let trend_adjustment = (drift * (horizon_hours / 24.0)).exp();
+        let mut expected_price = moving_average * trend_adjustment;
         if let Some(snapshot) = sentiment.as_ref() {
             expected_price = helpers::weight_with_sentiment(expected_price, snapshot);
         }
@@ -222,13 +230,6 @@ impl PredictionSdk {
         // High volatility -> Low confidence.
         // Low volatility -> High confidence.
         // Formula: 1.0 / (1.0 + scaling_factor * volatility * sqrt(time))
-        
-        let horizon_hours: f64 = match horizon {
-            ShortForecastHorizon::FifteenMinutes => 0.25,
-            ShortForecastHorizon::OneHour => 1.0,
-            ShortForecastHorizon::FourHours => 4.0,
-        };
-
         let scaling_factor = 12.0; // Tuned to balance short-horizon return regimes
         let time_scaling = horizon_hours.sqrt();
         let combined_uncertainty = 0.6 * volatility + 0.4 * decomposition.noise;
@@ -546,6 +547,21 @@ mod tests {
             .collect()
     }
 
+    fn trending_history(start: f64, factor: f64, points: usize) -> Vec<PricePoint> {
+        let start_time = Utc::now() - Duration::minutes(points as i64);
+        (0..points)
+            .map(|idx| {
+                let timestamp = start_time + Duration::minutes(idx as i64);
+                let price = start * factor.powi(idx as i32);
+                PricePoint {
+                    timestamp,
+                    price,
+                    volume: None,
+                }
+            })
+            .collect()
+    }
+
     #[tokio::test]
     async fn request_market_chart_handles_rate_limit() {
         let server = MockServer::start_async().await;
@@ -656,5 +672,41 @@ mod tests {
 
         assert!(low_conf > medium_conf);
         assert!(medium_conf > high_conf);
+    }
+
+    #[tokio::test]
+    async fn short_forecast_reflects_positive_trend() {
+        let sdk = PredictionSdk::new().expect("sdk construction should succeed");
+        let horizon = ShortForecastHorizon::FifteenMinutes;
+        let history = trending_history(100.0, 1.002, 24);
+
+        let result = sdk
+            .run_short_forecast(&history, horizon, None)
+            .await
+            .expect("forecast should succeed");
+
+        let window = helpers::short_horizon_window(horizon);
+        let moving_average = helpers::calculate_moving_average(&history, window)
+            .expect("moving average should succeed");
+
+        assert!(result.expected_price > moving_average);
+    }
+
+    #[tokio::test]
+    async fn short_forecast_reflects_negative_trend() {
+        let sdk = PredictionSdk::new().expect("sdk construction should succeed");
+        let horizon = ShortForecastHorizon::FifteenMinutes;
+        let history = trending_history(100.0, 0.998, 24);
+
+        let result = sdk
+            .run_short_forecast(&history, horizon, None)
+            .await
+            .expect("forecast should succeed");
+
+        let window = helpers::short_horizon_window(horizon);
+        let moving_average = helpers::calculate_moving_average(&history, window)
+            .expect("moving average should succeed");
+
+        assert!(result.expected_price < moving_average);
     }
 }

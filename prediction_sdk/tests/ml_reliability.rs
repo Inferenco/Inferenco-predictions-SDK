@@ -28,9 +28,9 @@ fn moving_average(prices: &[PricePoint], window: usize) -> f64 {
     sum / window as f64
 }
 
-fn volatility(prices: &[PricePoint]) -> f64 {
+fn drift_and_volatility(prices: &[PricePoint]) -> (f64, f64) {
     if prices.len() < 2 {
-        return 0.0;
+        return (0.0, 0.0);
     }
 
     let mut returns = Vec::with_capacity(prices.len() - 1);
@@ -38,21 +38,21 @@ fn volatility(prices: &[PricePoint]) -> f64 {
         if let [prev, current] = pair {
             let delta = match (current.timestamp - prev.timestamp).to_std() {
                 Ok(delta) => delta,
-                Err(_) => return 0.0,
+                Err(_) => return (0.0, 0.0),
             };
             let delta_days = delta.as_secs_f64() / 86_400.0;
             if delta_days <= f64::EPSILON {
-                return 0.0;
+                return (0.0, 0.0);
             }
             if prev.price <= 0.0 || current.price <= 0.0 {
-                return 0.0;
+                return (0.0, 0.0);
             }
             returns.push((current.price / prev.price).ln() / delta_days);
         }
     }
 
     if returns.is_empty() {
-        return 0.0;
+        return (0.0, 0.0);
     }
 
     let mean = returns.iter().copied().sum::<f64>() / returns.len() as f64;
@@ -61,7 +61,8 @@ fn volatility(prices: &[PricePoint]) -> f64 {
         .map(|value| (value - mean).powi(2))
         .sum::<f64>()
         / returns.len() as f64;
-    variance.sqrt()
+
+    (mean, variance.sqrt())
 }
 
 #[tokio::test]
@@ -74,7 +75,10 @@ async fn unreliable_ml_is_downweighted() {
         .await
         .expect("short forecast should succeed");
 
-    let base = moving_average(&history, 48) + volatility(&history) * 0.1;
+    let (drift, _volatility) = drift_and_volatility(&history);
+    let time_fraction = 1.0 / 24.0;
+    let trend_adjustment = (drift * time_fraction).exp();
+    let base = moving_average(&history, 48) * trend_adjustment;
 
     let reliability = result.ml_reliability.expect("ml reliability should exist");
     assert!(reliability < 0.1);
