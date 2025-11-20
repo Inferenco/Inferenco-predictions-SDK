@@ -199,14 +199,25 @@ impl PredictionSdk {
         sentiment: Option<SentimentSnapshot>,
     ) -> Result<ShortForecastResult, PredictionError> {
         let window = helpers::short_horizon_window(horizon);
+        if history.len() < 2 {
+            return Err(PredictionError::InsufficientData);
+        }
+
         let moving_average = helpers::calculate_moving_average(history, window)?;
-        let volatility = helpers::calculate_volatility(history)?;
+        let volatility_window = window.saturating_mul(2).max(2);
+        let recent_len = history.len().min(volatility_window);
+        if recent_len < 2 {
+            return Err(PredictionError::InsufficientData);
+        }
+        let recent_history = &history[history.len() - recent_len..];
+
+        let volatility = helpers::calculate_volatility(recent_history)?;
         let mut expected_price = moving_average + volatility * 0.1;
         if let Some(snapshot) = sentiment.as_ref() {
             expected_price = helpers::weight_with_sentiment(expected_price, snapshot);
         }
 
-        let decomposition = helpers::decompose_series(history)?;
+        let decomposition = helpers::decompose_series(recent_history)?;
         // Use a sigmoid-like decay for confidence based on volatility.
         // High volatility -> Low confidence.
         // Low volatility -> High confidence.
