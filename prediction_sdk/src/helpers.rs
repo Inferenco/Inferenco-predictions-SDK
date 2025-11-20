@@ -186,10 +186,42 @@ pub(crate) fn decompose_series(
         return Err(PredictionError::InsufficientData);
     }
 
-    let trend = prices.iter().map(|p| p.price).sum::<f64>() / prices.len() as f64;
     let momentum = prices.last().map(|p| p.price).unwrap_or_default()
         - prices.first().map(|p| p.price).unwrap_or_default();
-    let noise = calculate_volatility(prices)?;
+
+    let price_values: Vec<f64> = prices.iter().map(|p| p.price).collect();
+    let count = price_values.len();
+    let indices: Vec<f64> = (0..count).map(|idx| idx as f64).collect();
+    let mean_x = indices.iter().copied().sum::<f64>() / count as f64;
+    let mean_y = price_values.iter().copied().sum::<f64>() / count as f64;
+
+    let denominator: f64 = indices
+        .iter()
+        .map(|x| (x - mean_x).powi(2))
+        .sum();
+    let slope = if denominator.abs() < f64::EPSILON {
+        0.0
+    } else {
+        indices
+            .iter()
+            .zip(price_values.iter())
+            .map(|(x, y)| (x - mean_x) * (y - mean_y))
+            .sum::<f64>()
+            / denominator
+    };
+    let intercept = mean_y - slope * mean_x;
+    let trend = intercept + slope * (count as f64 - 1.0);
+
+    let residuals: Vec<f64> = indices
+        .iter()
+        .zip(price_values.iter())
+        .map(|(x, price)| price - (intercept + slope * x))
+        .collect();
+    let noise = if residuals.len() < 2 {
+        0.0
+    } else {
+        residuals.std_dev()
+    };
 
     Ok(ForecastDecomposition {
         trend,
