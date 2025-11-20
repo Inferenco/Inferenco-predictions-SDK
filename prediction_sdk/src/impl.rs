@@ -218,9 +218,10 @@ impl PredictionSdk {
             ShortForecastHorizon::FourHours => 4.0,
         };
 
-        let scaling_factor = 100.0; // Adjust this to tune sensitivity
+        let scaling_factor = 12.0; // Tuned to balance short-horizon return regimes
         let time_scaling = horizon_hours.sqrt();
-        let confidence_value = 1.0 / (1.0 + scaling_factor * (volatility + decomposition.noise) * time_scaling);
+        let combined_uncertainty = 0.6 * volatility + 0.4 * decomposition.noise;
+        let confidence_value = 1.0 / (1.0 + scaling_factor * combined_uncertainty * time_scaling);
         let confidence = helpers::normalize_confidence(confidence_value);
 
         // Calculate technical signals
@@ -501,12 +502,30 @@ fn build_price_points(payload: MarketChartResponse) -> Result<Vec<PricePoint>, P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Duration, Utc};
     use httpmock::prelude::*;
 
 
     fn build_sdk(server: &MockServer) -> PredictionSdk {
         let client = Client::builder().build().unwrap();
         PredictionSdk::with_client(client, Some(server.base_url()))
+    }
+
+    fn synthetic_volatility_series(scale: f64) -> Vec<PricePoint> {
+        let start = Utc::now() - Duration::days(60);
+        (0..60)
+            .map(|idx| {
+                let t = start + Duration::days(idx as i64);
+                let base_growth = 1.0 + 0.001 * idx as f64;
+                let oscillation = (idx as f64 / 3.0).sin() * scale;
+                let price = 100.0 * base_growth * (1.0 + oscillation);
+                PricePoint {
+                    timestamp: t,
+                    price,
+                    volume: None,
+                }
+            })
+            .collect()
     }
 
     #[tokio::test]
@@ -586,5 +605,38 @@ mod tests {
         // It might differ, but shouldn't be 0 or NaN.
         assert!(result.expected_price > 0.0);
         assert_eq!(result.horizon, horizon);
+    }
+
+    #[tokio::test]
+    async fn short_forecast_confidence_tracks_volatility_levels() {
+        let sdk = PredictionSdk::new().expect("sdk construction should succeed");
+        let horizon = ShortForecastHorizon::OneHour;
+
+        let low_vol_history = synthetic_volatility_series(0.001);
+        let medium_vol_history = synthetic_volatility_series(0.01);
+        let high_vol_history = synthetic_volatility_series(0.05);
+
+        let low_conf = sdk
+            .run_short_forecast(&low_vol_history, horizon, None)
+            .await
+            .expect("low-volatility forecast should succeed")
+            .confidence;
+        let medium_conf = sdk
+            .run_short_forecast(&medium_vol_history, horizon, None)
+            .await
+            .expect("medium-volatility forecast should succeed")
+            .confidence;
+        let high_conf = sdk
+            .run_short_forecast(&high_vol_history, horizon, None)
+            .await
+            .expect("high-volatility forecast should succeed")
+            .confidence;
+
+        for confidence in [low_conf, medium_conf, high_conf] {
+            assert!((0.0f32..=1.0f32).contains(&confidence));
+        }
+
+        assert!(low_conf > medium_conf);
+        assert!(medium_conf > high_conf);
     }
 }
