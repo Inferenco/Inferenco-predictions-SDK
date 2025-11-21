@@ -119,6 +119,15 @@ pub struct ForecastRequest {
     pub vs_currency: String,
     pub horizon: ForecastHorizon,
     pub sentiment: Option<SentimentSnapshot>,
+    #[serde(default)]
+    pub chart: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ForecastResponse {
+    pub forecast: ForecastResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chart: Option<Vec<PricePoint>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
