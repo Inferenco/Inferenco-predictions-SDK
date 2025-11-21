@@ -1,8 +1,8 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    ForecastHorizon, ForecastRequest, ForecastResult, PredictionError, PredictionSdk,
-    SentimentSnapshot, helpers,
+    ForecastHorizon, ForecastRequest, ForecastResponse, ForecastResult, PredictionError,
+    PredictionSdk, SentimentSnapshot, helpers,
 };
 
 const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
@@ -14,7 +14,8 @@ const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
 /// optional sentiment. The handler fetches the correct lookback window for the
 /// requested horizon (range-based for long forecasts, rolling days for short
 /// forecasts), dispatches to the appropriate SDK method, and returns a JSON
-/// string containing a [`ForecastResult`].
+/// string containing either a [`ForecastResult`] (default) or a
+/// [`ForecastResponse`] when `chart` data is requested.
 ///
 /// # Examples
 ///
@@ -33,10 +34,11 @@ const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
 ///         news_score: 0.1,
 ///         social_score: 0.05,
 ///     }),
+///     chart: true,
 /// };
 ///
 /// let json = prediction_sdk::run_prediction_handler(request).await?;
-/// println!("{json}");
+/// println!("{json}"); // ForecastResponse when chart=true
 /// # Ok(())
 /// # }
 /// ```
@@ -46,8 +48,9 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
         news_score: 0.0,
         social_score: 0.0,
     });
+    let chart_requested = request.chart;
 
-    let forecast = match request.horizon {
+    let (forecast, chart) = match request.horizon {
         ForecastHorizon::Short(horizon) => {
             let history = sdk
                 .fetch_price_history(
@@ -57,9 +60,13 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
                 )
                 .await?;
 
-            sdk.run_short_forecast(&history, horizon, Some(sentiment.clone()))
+            let forecast = sdk
+                .run_short_forecast(&history, horizon, Some(sentiment.clone()))
                 .await
-                .map(ForecastResult::Short)
+                .map(ForecastResult::Short)?;
+
+            let chart = chart_requested.then_some(history);
+            (forecast, chart)
         }
         ForecastHorizon::Long(horizon) => {
             let now = Utc::now();
@@ -69,11 +76,21 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
                 .fetch_price_history_range(&request.asset_id, &request.vs_currency, start, now)
                 .await?;
 
-            sdk.run_long_forecast(&history, horizon, Some(sentiment.clone()))
+            let forecast = sdk
+                .run_long_forecast(&history, horizon, Some(sentiment.clone()))
                 .await
-                .map(ForecastResult::Long)
-        }
-    }?;
+                .map(ForecastResult::Long)?;
 
-    serde_json::to_string(&forecast).map_err(|err| PredictionError::Serialization(err.to_string()))
+            let chart = chart_requested.then_some(history);
+            (forecast, chart)
+        }
+    };
+
+    if chart_requested {
+        let response = ForecastResponse { forecast, chart };
+        serde_json::to_string(&response)
+    } else {
+        serde_json::to_string(&forecast)
+    }
+    .map_err(|err| PredictionError::Serialization(err.to_string()))
 }
