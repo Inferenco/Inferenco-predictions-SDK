@@ -18,6 +18,7 @@ use crate::analysis;
 use crate::cache::{ApiCache, ForecastCache, ApiCacheKey, ForecastCacheKey, ForecastCacheValue, hash_sentiment};
 use crate::{
     ForecastHorizon,
+    ForecastBandPoint,
     ForecastResult,
     LongForecastHorizon,
     LongForecastResult,
@@ -370,7 +371,8 @@ impl PredictionSdk {
         history: &[PricePoint],
         horizon: LongForecastHorizon,
         sentiment: Option<SentimentSnapshot>,
-    ) -> Result<LongForecastResult, PredictionError> {
+        chart: bool,
+    ) -> Result<(LongForecastResult, Option<Vec<ForecastBandPoint>>), PredictionError> {
         let days = helpers::long_horizon_days(horizon);
         let simulations = helpers::scaled_simulation_count(days, DEFAULT_SIMULATIONS);
         let (drift, _) = helpers::daily_return_stats(history)?;
@@ -382,10 +384,11 @@ impl PredictionSdk {
             drift,
             &volatility_path,
             Some(0.005), // Reduced from 0.02 to avoid excessive bearish pull
+            chart,
         )?;
-        let mean_price = paths.iter().sum::<f64>() / paths.len() as f64;
-        let percentile_10 = helpers::percentile(paths.clone(), 0.1)?;
-        let percentile_90 = helpers::percentile(paths, 0.9)?;
+        let mean_price = paths.final_prices.iter().sum::<f64>() / paths.final_prices.len() as f64;
+        let percentile_10 = helpers::percentile(paths.final_prices.clone(), 0.1)?;
+        let percentile_90 = helpers::percentile(paths.final_prices.clone(), 0.9)?;
         let mut adjusted_mean = mean_price;
         if let Some(snapshot) = sentiment.as_ref() {
             adjusted_mean = helpers::weight_with_sentiment(adjusted_mean, snapshot);
@@ -404,15 +407,50 @@ impl PredictionSdk {
         // Calculate technical signals (still useful for long horizons as a starting point)
         let technical_signals = analysis::calculate_technical_signals(history).ok();
 
-        Ok(LongForecastResult {
-            horizon,
-            mean_price: adjusted_mean,
-            percentile_10,
-            percentile_90,
-            confidence,
-            technical_signals,
-            ml_prediction: Some(mean_price),
-        })
+        let projection = if chart {
+            let last_timestamp = history
+                .iter()
+                .max_by_key(|point| point.timestamp)
+                .map(|point| point.timestamp)
+                .ok_or(PredictionError::InsufficientData)?;
+
+            paths
+                .step_samples
+                .as_ref()
+                .map(|steps| {
+                    steps
+                        .iter()
+                        .map(|sample| {
+                            let timestamp = last_timestamp
+                                .checked_add_signed(Duration::days(i64::from(sample.day)))
+                                .ok_or(PredictionError::TimeConversion)?;
+
+                            Ok(ForecastBandPoint {
+                                timestamp,
+                                percentile_10: sample.percentile_10,
+                                mean: sample.mean,
+                                percentile_90: sample.percentile_90,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, PredictionError>>()
+                })
+                .transpose()?
+        } else {
+            None
+        };
+
+        Ok((
+            LongForecastResult {
+                horizon,
+                mean_price: adjusted_mean,
+                percentile_10,
+                percentile_90,
+                confidence,
+                technical_signals,
+                ml_prediction: Some(mean_price),
+            },
+            projection,
+        ))
     }
 
     /// Dispatch to the appropriate forecast algorithm using pre-fetched
@@ -434,9 +472,9 @@ impl PredictionSdk {
                 .await
                 .map(ForecastResult::Short),
             ForecastHorizon::Long(long_horizon) => self
-                .run_long_forecast(history, long_horizon, sentiment)
+                .run_long_forecast(history, long_horizon, sentiment, false)
                 .await
-                .map(ForecastResult::Long),
+                .map(|(forecast, _)| ForecastResult::Long(forecast)),
         }
     }
 
