@@ -2,6 +2,11 @@
 
 A Rust library for cryptocurrency price forecasting that combines statistical methods, technical analysis, and machine learning.
 
+## Projects using this SDK
+
+- [DeFiCalc](https://deficalc.io/) integrates the SDK for price-aware DeFi calculations.
+- [Inferenco Nova](https://inferenco.com/app.html#nova) uses the SDK to power AI-driven blockchain conversations and tooling.
+
 ## Features
 
 - **Hybrid Forecasting Engine**: Ensemble of statistical models, ML (SVR), and technical indicators
