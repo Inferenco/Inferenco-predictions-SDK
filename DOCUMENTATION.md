@@ -468,11 +468,12 @@ let request_json = r#"{
   "asset_id": "bitcoin",
   "vs_currency": "usd",
   "horizon": { "short": "one_hour" },
-  "sentiment": { "news_score": 0.1, "social_score": -0.05 }
+  "sentiment": { "news_score": 0.1, "social_score": -0.05 },
+  "chart": true
 }"#;
 
 let result = run_prediction_handler(request_json).await?;
-println!("{}", result); // JSON string
+println!("{}", result); // JSON string with chart data included
 ```
 
 ### Request Schema
@@ -490,7 +491,8 @@ println!("{}", result); // JSON string
   "sentiment": {  // Optional
     "news_score": 0.1,    // -1.0 to 1.0
     "social_score": -0.05 // -1.0 to 1.0
-  }
+  },
+  "chart": true // Optional boolean. If true, response includes "chart" object.
 }
 ```
 
@@ -498,7 +500,7 @@ println!("{}", result); // JSON string
 ```rust
 match run_prediction_handler(request_json).await {
     Ok(json) => {
-        // Success: parse ForecastResult from json
+        // Success: parse ForecastResult (chart=false) or ForecastResponse (chart=true) from json
     }
     Err(e) => {
         // PredictionError variants:

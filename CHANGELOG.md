@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-11-21
+
+### Added
+- **Chart-Aware Forecasts**: Added `chart` flag to `ForecastRequest` to optionally retrieve historical candles and projection bands.
+- **Chart Data Structures**: Introduced `ForecastResponse`, `ForecastChart`, `ChartCandle`, and `ForecastBandPoint` DTOs.
+- **Monte Carlo Projections**: Updated long-term forecasting to generate per-day projection bands when chart data is requested.
+- **New Examples**: Added `chart_btc_15m.rs` and `chart_eth_1y.rs` demonstrating how to fetch and display chart data.
+- **Documentation**: Updated `README.md` and `DOCUMENTATION.md` with "Fetching Charts" guides and API details.
+
 ## [0.1.1] - 2025-11-20
 
 ### Changed
