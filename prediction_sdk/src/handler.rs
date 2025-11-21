@@ -60,12 +60,26 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
                 )
                 .await?;
 
+            let history_candles = if chart_requested {
+                Some(
+                    sdk.fetch_chart_candles(
+                        &request.asset_id,
+                        &request.vs_currency,
+                        SHORT_FORECAST_LOOKBACK_DAYS,
+                        &history,
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+
             let forecast = sdk
                 .run_short_forecast(&history, horizon, Some(sentiment.clone()))
                 .await
                 .map(ForecastResult::Short)?;
 
-            let chart = chart_requested.then(|| ForecastChart {
+            let chart = history_candles.map(|history| ForecastChart {
                 history,
                 projection: None,
             });
@@ -85,10 +99,19 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
 
             let forecast = ForecastResult::Long(forecast);
 
-            let chart = chart_requested.then(|| ForecastChart {
-                history,
-                projection,
-            });
+            let chart = if chart_requested {
+                let history = sdk
+                    .fetch_chart_candles(
+                        &request.asset_id,
+                        &request.vs_currency,
+                        lookback_days,
+                        &history,
+                    )
+                    .await?;
+                Some(ForecastChart { history, projection })
+            } else {
+                None
+            };
             (forecast, chart)
         }
     };

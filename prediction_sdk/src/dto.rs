@@ -16,6 +16,24 @@ pub struct PricePoint {
     pub volume: Option<f64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// Candlestick data derived from CoinGecko endpoints or locally aggregated.
+///
+/// * `timestamp` marks the start of the bucket (in UTC) represented by the
+///   OHLC values.
+/// * `open`, `high`, `low`, and `close` capture the price movement within the
+///   bucket.
+/// * `volume` aggregates the traded volume when the upstream series provides
+///   it; otherwise it is omitted.
+pub struct ChartCandle {
+    pub timestamp: DateTime<Utc>,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: Option<f64>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 /// Short forecast horizons used for intraday predictions.
@@ -202,7 +220,7 @@ pub struct ForecastBandPoint {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ForecastChart {
-    pub history: Vec<PricePoint>,
+    pub history: Vec<ChartCandle>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projection: Option<Vec<ForecastBandPoint>>,
 }
