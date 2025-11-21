@@ -55,6 +55,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Chart responses
+
+When `chart` is enabled on a request, the SDK augments the forecast with
+historical candles derived from CoinGecko OHLC data (or locally aggregated from
+the fetched price series). Each candle includes an ISO-8601 timestamp marking
+the bucket start, open/high/low/close prices, and an optional aggregated volume
+when the upstream endpoint supplies it.
+
+```json
+{
+  "forecast": { "type": "short", "value": { /* ... */ } },
+  "chart": {
+    "history": [
+      {
+        "timestamp": "2024-01-01T00:00:00Z",
+        "open": 42000.0,
+        "high": 42500.0,
+        "low": 41800.0,
+        "close": 42350.0,
+        "volume": 1823.4
+      }
+    ],
+    "projection": [
+      {"timestamp": "2024-01-02T00:00:00Z", "percentile_10": 40000.0, "mean": 43000.0, "percentile_90": 46000.0}
+    ]
+  }
+}
+```
+
 ## Run the Example
 
 ```bash

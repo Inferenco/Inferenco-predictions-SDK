@@ -29,3 +29,11 @@ Run these commands from the `prediction_sdk` directory to verify forecasts for S
     ```bash
     cargo run --example stohn_1y
     ```
+
+## Chart responses
+
+Set `chart=true` on your payload to receive a `chart.history` array of OHLC
+candles alongside the forecast. Each entry contains `timestamp`, `open`,
+`high`, `low`, `close`, and an optional `volume` if the upstream endpoint
+provides it. The SDK will call CoinGecko's `/ohlc` endpoint when available or
+derive the candle values from the fetched market chart data.

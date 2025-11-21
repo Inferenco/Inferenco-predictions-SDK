@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use governor::{Quota, RateLimiter};
@@ -20,6 +20,7 @@ use crate::{
     ForecastHorizon,
     ForecastBandPoint,
     ForecastResult,
+    ChartCandle,
     LongForecastHorizon,
     LongForecastResult,
     PredictionError,
@@ -209,6 +210,26 @@ impl PredictionSdk {
         ];
 
         self.request_market_chart(url, query).await
+    }
+
+    /// Fetch chart-ready OHLC data. Attempts to use the dedicated CoinGecko
+    /// `/ohlc` endpoint when available and falls back to aggregating the
+    /// provided price history into candles.
+    pub async fn fetch_chart_candles(
+        &self,
+        asset_id: &str,
+        vs_currency: &str,
+        days: u32,
+        fallback_history: &[PricePoint],
+    ) -> Result<Vec<ChartCandle>, PredictionError> {
+        if let Ok(ohlc) = self
+            .request_market_ohlc(asset_id, vs_currency, days)
+            .await
+        {
+            return Ok(ohlc);
+        }
+
+        aggregate_candles_from_history(fallback_history)
     }
 
     /// Convenience alias for [`fetch_price_history_range`].
@@ -627,6 +648,76 @@ impl PredictionSdk {
             )));
         }
     }
+
+    async fn request_market_ohlc(
+        &self,
+        asset_id: &str,
+        vs_currency: &str,
+        days: u32,
+    ) -> Result<Vec<ChartCandle>, PredictionError> {
+        let url = format!("{}/coins/{}/ohlc", self.market_base_url, asset_id);
+        let query = vec![
+            ("vs_currency", vs_currency.to_string()),
+            ("days", days.to_string()),
+        ];
+
+        let max_retries = 5;
+        let mut attempt = 0;
+        let base_delay_ms = 500;
+
+        loop {
+            self.limiter.until_ready().await;
+
+            let response = self
+                .client
+                .get(&url)
+                .query(&query)
+                .send()
+                .await
+                .map_err(|err| PredictionError::Network(err.to_string()))?;
+
+            let status = response.status();
+
+            if status.is_success() {
+                let payload: Vec<[f64; 5]> = response
+                    .json()
+                    .await
+                    .map_err(|err| PredictionError::Serialization(err.to_string()))?;
+                let candles = build_chart_candles(payload)?;
+                return Ok(candles);
+            }
+
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                attempt += 1;
+                if attempt > max_retries {
+                    return Err(PredictionError::Network(
+                        "rate limited by upstream provider (max retries exceeded)".to_string(),
+                    ));
+                }
+
+                let retry_after = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+
+                let delay = if let Some(seconds) = retry_after {
+                    std::time::Duration::from_secs(seconds)
+                } else {
+                    let factor = 2u64.pow(attempt as u32 - 1);
+                    std::time::Duration::from_millis(base_delay_ms * factor)
+                };
+
+                sleep(delay).await;
+                continue;
+            }
+
+            return Err(PredictionError::Network(format!(
+                "unexpected status: {}",
+                status
+            )));
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -662,11 +753,106 @@ fn build_price_points(payload: MarketChartResponse) -> Result<Vec<PricePoint>, P
     Ok(points)
 }
 
+fn build_chart_candles(payload: Vec<[f64; 5]>) -> Result<Vec<ChartCandle>, PredictionError> {
+    let mut candles = Vec::with_capacity(payload.len());
+    for entry in payload {
+        let timestamp_ms = entry[0] as i64;
+        let timestamp = Utc
+            .timestamp_millis_opt(timestamp_ms)
+            .single()
+            .ok_or(PredictionError::TimeConversion)?;
+        candles.push(ChartCandle {
+            timestamp,
+            open: entry[1],
+            high: entry[2],
+            low: entry[3],
+            close: entry[4],
+            volume: None,
+        });
+    }
+
+    Ok(candles)
+}
+
+fn aggregate_candles_from_history(history: &[PricePoint]) -> Result<Vec<ChartCandle>, PredictionError> {
+    if history.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut sorted = history.to_vec();
+    sorted.sort_by_key(|point| point.timestamp);
+
+    let bucket_seconds = sorted
+        .windows(2)
+        .filter_map(|pair| {
+            let delta = pair[1].timestamp - pair[0].timestamp;
+            let seconds = delta.num_seconds();
+            (seconds > 0).then_some(seconds)
+        })
+        .min()
+        .unwrap_or(3600);
+
+    let mut buckets: BTreeMap<i64, Vec<PricePoint>> = BTreeMap::new();
+    for point in sorted {
+        let ts = point.timestamp.timestamp();
+        let bucket_key = if bucket_seconds > 0 {
+            ts - (ts % bucket_seconds)
+        } else {
+            ts
+        };
+        buckets.entry(bucket_key).or_default().push(point);
+    }
+
+    let mut candles = Vec::with_capacity(buckets.len());
+    for points in buckets.values() {
+        if points.is_empty() {
+            continue;
+        }
+        let open_point = points
+            .first()
+            .ok_or(PredictionError::TimeConversion)?;
+        let close_point = points
+            .last()
+            .ok_or(PredictionError::TimeConversion)?;
+        let mut high = open_point.price;
+        let mut low = open_point.price;
+        let mut volume_sum = 0.0;
+        let mut has_volume = false;
+
+        for point in points {
+            if point.price > high {
+                high = point.price;
+            }
+            if point.price < low {
+                low = point.price;
+            }
+            if let Some(volume) = point.volume {
+                volume_sum += volume;
+                has_volume = true;
+            }
+        }
+
+        let volume = if has_volume { Some(volume_sum) } else { None };
+
+        candles.push(ChartCandle {
+            timestamp: open_point.timestamp,
+            open: open_point.price,
+            high,
+            low,
+            close: close_point.price,
+            volume,
+        });
+    }
+
+    Ok(candles)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::{Duration, Utc};
     use httpmock::prelude::*;
+    use serde_json::json;
 
 
     fn build_sdk(server: &MockServer) -> PredictionSdk {
@@ -751,6 +937,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_market_ohlc_parses_payload() {
+        let server = MockServer::start_async().await;
+        let timestamp_ms = 1_700_000_000_000i64;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/coins/bitcoin/ohlc")
+                    .query_param("vs_currency", "usd")
+                    .query_param("days", "1");
+                then.status(200)
+                    .json_body(json!([[timestamp_ms, 10.0, 15.0, 5.0, 12.5]]));
+            })
+            .await;
+
+        let sdk = build_sdk(&server);
+        let candles = sdk
+            .fetch_chart_candles("bitcoin", "usd", 1, &[])
+            .await
+            .expect("expected OHLC payload to parse");
+
+        mock.assert();
+        assert_eq!(candles.len(), 1);
+        let candle = &candles[0];
+        assert_eq!(candle.timestamp.timestamp_millis(), timestamp_ms);
+        assert_eq!(candle.open, 10.0);
+        assert_eq!(candle.high, 15.0);
+        assert_eq!(candle.low, 5.0);
+        assert_eq!(candle.close, 12.5);
+        assert!(candle.volume.is_none());
+    }
+
+    #[tokio::test]
     async fn short_forecast_matches_helper_math() {
         let history = (0..60)
             .map(|idx| PricePoint {
@@ -778,11 +996,52 @@ mod tests {
         // We just verify that the result is reasonable (finite) and that we got an ML prediction.
         assert!(result.expected_price.is_finite());
         assert!(result.ml_prediction.is_some());
-        
+
         // Check that the result is not wildly different from the statistical baseline (heuristic)
         // It might differ, but shouldn't be 0 or NaN.
         assert!(result.expected_price > 0.0);
         assert_eq!(result.horizon, horizon);
+    }
+
+    #[test]
+    fn aggregates_history_into_candles_with_volume() {
+        let base = Utc.timestamp_opt(1_700_000_000, 0).single().unwrap();
+        let history = vec![
+            PricePoint {
+                timestamp: base,
+                price: 10.0,
+                volume: Some(1.0),
+            },
+            PricePoint {
+                timestamp: base + Duration::seconds(30),
+                price: 15.0,
+                volume: Some(2.0),
+            },
+            PricePoint {
+                timestamp: base + Duration::seconds(60),
+                price: 8.0,
+                volume: Some(3.0),
+            },
+        ];
+
+        let candles = aggregate_candles_from_history(&history).expect("aggregation should succeed");
+
+        assert_eq!(candles.len(), 2);
+        let first = &candles[0];
+        assert_eq!(first.timestamp, base);
+        assert_eq!(first.open, 10.0);
+        assert_eq!(first.high, 15.0);
+        assert_eq!(first.low, 10.0);
+        assert_eq!(first.close, 15.0);
+        assert_eq!(first.volume, Some(3.0));
+
+        let second = &candles[1];
+        assert_eq!(second.timestamp, base + Duration::seconds(60));
+        assert_eq!(second.open, 8.0);
+        assert_eq!(second.high, 8.0);
+        assert_eq!(second.low, 8.0);
+        assert_eq!(second.close, 8.0);
+        assert_eq!(second.volume, Some(3.0));
     }
 
     #[tokio::test]
