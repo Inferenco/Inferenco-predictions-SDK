@@ -1013,7 +1013,7 @@ mod tests {
                 volume: Some(1.0),
             },
             PricePoint {
-                timestamp: base + Duration::seconds(30),
+                timestamp: base, // Same timestamp to force aggregation
                 price: 15.0,
                 volume: Some(2.0),
             },
