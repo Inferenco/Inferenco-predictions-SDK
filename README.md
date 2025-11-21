@@ -60,17 +60,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Chart responses
+### Fetching Charts
 
-When `chart` is enabled on a request, the SDK augments the forecast with
-historical candles derived from CoinGecko OHLC data (or locally aggregated from
-the fetched price series). Each candle includes an ISO-8601 timestamp marking
-the bucket start, open/high/low/close prices, and an optional aggregated volume
-when the upstream endpoint supplies it.
+To retrieve historical candles and (for long horizons) projection bands, set the `chart` flag to `true` in your request. This is best handled via the `run_prediction_handler` helper or by manually calling `fetch_chart_candles`.
+
+```rust
+use prediction_sdk::{ForecastRequest, ForecastHorizon, ShortForecastHorizon, run_prediction_handler};
+
+// ... inside async fn
+let request = ForecastRequest {
+    asset_id: "bitcoin".to_string(),
+    vs_currency: "usd".to_string(),
+    horizon: ForecastHorizon::Short(ShortForecastHorizon::OneHour),
+    sentiment: None,
+    chart: true, // <--- Enable chart data
+};
+
+// Returns a JSON string containing both "forecast" and "chart" fields
+let json_response = run_prediction_handler(request).await?;
+println!("{}", json_response);
+```
+
+**Response Structure:**
 
 ```json
 {
-  "forecast": { "type": "short", "value": { /* ... */ } },
+  "forecast": {
+    "type": "short",
+    "value": {
+      "expected_price": 42350.0,
+      "confidence": 0.85,
+      // ... other forecast fields
+    }
+  },
   "chart": {
     "history": [
       {
@@ -81,9 +103,16 @@ when the upstream endpoint supplies it.
         "close": 42350.0,
         "volume": 1823.4
       }
+      // ... more candles
     ],
     "projection": [
-      {"timestamp": "2024-01-02T00:00:00Z", "percentile_10": 40000.0, "mean": 43000.0, "percentile_90": 46000.0}
+      // Only present for Long horizons
+      {
+        "timestamp": "2024-01-02T00:00:00Z", 
+        "percentile_10": 40000.0, 
+        "mean": 43000.0, 
+        "percentile_90": 46000.0
+      }
     ]
   }
 }

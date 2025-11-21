@@ -108,7 +108,10 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
                         &history,
                     )
                     .await?;
-                Some(ForecastChart { history, projection })
+                Some(ForecastChart {
+                    history,
+                    projection,
+                })
             } else {
                 None
             };

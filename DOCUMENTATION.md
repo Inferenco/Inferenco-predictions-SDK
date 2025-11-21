@@ -492,7 +492,7 @@ println!("{}", result); // JSON string with chart data included
     "news_score": 0.1,    // -1.0 to 1.0
     "social_score": -0.05 // -1.0 to 1.0
   },
-  "chart": true // Optional, defaults to false
+  "chart": true // Optional boolean. If true, response includes "chart" object.
 }
 ```
 

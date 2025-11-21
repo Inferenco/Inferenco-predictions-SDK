@@ -217,7 +217,8 @@ pub(crate) fn run_monte_carlo(
     let last_price = latest_price(prices)?;
     let mut rng = rand::thread_rng();
     let mut outcomes = Vec::with_capacity(simulations);
-    let mut daily_prices = collect_steps.then_some(vec![Vec::with_capacity(simulations); days as usize]);
+    let mut daily_prices =
+        collect_steps.then_some(vec![Vec::with_capacity(simulations); days as usize]);
     let time_step = 1.0;
     for _ in 0..simulations {
         let mut price = last_price;
@@ -243,9 +244,7 @@ pub(crate) fn run_monte_carlo(
         outcomes.push(price);
     }
 
-    let step_samples = daily_prices
-        .map(aggregate_step_samples)
-        .transpose()?;
+    let step_samples = daily_prices.map(aggregate_step_samples).transpose()?;
 
     Ok(MonteCarloRun {
         final_prices: outcomes,
@@ -284,13 +283,13 @@ pub(crate) fn monte_carlo_benchmark(
         false,
     )?;
 
-    let constant_mean = constant_runs.final_prices.iter().sum::<f64>()
-        / constant_runs.final_prices.len() as f64;
+    let constant_mean =
+        constant_runs.final_prices.iter().sum::<f64>() / constant_runs.final_prices.len() as f64;
     let constant_percentile_10 = percentile(constant_runs.final_prices.clone(), 0.1)?;
     let constant_percentile_90 = percentile(constant_runs.final_prices.clone(), 0.9)?;
 
-    let regime_mean = regime_runs.final_prices.iter().sum::<f64>()
-        / regime_runs.final_prices.len() as f64;
+    let regime_mean =
+        regime_runs.final_prices.iter().sum::<f64>() / regime_runs.final_prices.len() as f64;
     let regime_percentile_10 = percentile(regime_runs.final_prices.clone(), 0.1)?;
     let regime_percentile_90 = percentile(regime_runs.final_prices.clone(), 0.9)?;
 
@@ -414,7 +413,11 @@ mod tests {
         assert_eq!(result.final_prices, vec![100.0; 5]);
         let steps = result.step_samples.expect("missing step samples");
         assert_eq!(steps.len(), 3);
-        assert!(steps.iter().all(|sample| (sample.mean - 100.0).abs() < f64::EPSILON));
+        assert!(
+            steps
+                .iter()
+                .all(|sample| (sample.mean - 100.0).abs() < f64::EPSILON)
+        );
     }
 
     #[test]
@@ -425,8 +428,8 @@ mod tests {
 
         let volatility_path = vec![volatility; 2];
 
-        let result = run_monte_carlo(&history, 2, 8, drift, &volatility_path, Some(0.01), false)
-            .unwrap();
+        let result =
+            run_monte_carlo(&history, 2, 8, drift, &volatility_path, Some(0.01), false).unwrap();
 
         assert_eq!(result.final_prices.len(), 8);
     }
