@@ -235,10 +235,8 @@ pub(crate) fn run_monte_carlo(
             let step = drift_component + reversion_adjustment + shock;
             price *= step.exp();
 
-            if let Some(daily) = daily_prices.as_mut() {
-                if let Some(bucket) = daily.get_mut(day) {
-                    bucket.push(price);
-                }
+            if let Some(bucket) = daily_prices.as_mut().and_then(|daily| daily.get_mut(day)) {
+                bucket.push(price);
             }
         }
         outcomes.push(price);
