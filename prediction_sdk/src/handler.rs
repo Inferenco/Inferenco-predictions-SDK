@@ -1,8 +1,8 @@
 use chrono::{Duration, Utc};
 
 use crate::{
-    ForecastHorizon, ForecastRequest, ForecastResponse, ForecastResult, PredictionError,
-    PredictionSdk, SentimentSnapshot, helpers,
+    ForecastChart, ForecastHorizon, ForecastRequest, ForecastResponse, ForecastResult,
+    PredictionError, PredictionSdk, SentimentSnapshot, helpers,
 };
 
 const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
@@ -65,7 +65,10 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
                 .await
                 .map(ForecastResult::Short)?;
 
-            let chart = chart_requested.then_some(history);
+            let chart = chart_requested.then(|| ForecastChart {
+                history,
+                projection: None,
+            });
             (forecast, chart)
         }
         ForecastHorizon::Long(horizon) => {
@@ -76,12 +79,16 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
                 .fetch_price_history_range(&request.asset_id, &request.vs_currency, start, now)
                 .await?;
 
-            let forecast = sdk
-                .run_long_forecast(&history, horizon, Some(sentiment.clone()))
-                .await
-                .map(ForecastResult::Long)?;
+            let (forecast, projection) = sdk
+                .run_long_forecast(&history, horizon, Some(sentiment.clone()), chart_requested)
+                .await?;
 
-            let chart = chart_requested.then_some(history);
+            let forecast = ForecastResult::Long(forecast);
+
+            let chart = chart_requested.then(|| ForecastChart {
+                history,
+                projection,
+            });
             (forecast, chart)
         }
     };

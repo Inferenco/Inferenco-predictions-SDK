@@ -127,7 +127,22 @@ pub struct ForecastRequest {
 pub struct ForecastResponse {
     pub forecast: ForecastResult,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub chart: Option<Vec<PricePoint>>,
+    pub chart: Option<ForecastChart>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SimulationStepSample {
+    pub day: u32,
+    pub mean: f64,
+    pub percentile_10: f64,
+    pub percentile_90: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MonteCarloRun {
+    pub final_prices: Vec<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_samples: Option<Vec<SimulationStepSample>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -175,6 +190,21 @@ pub struct LongForecastResult {
     pub technical_signals: Option<TechnicalSignals>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_prediction: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ForecastBandPoint {
+    pub timestamp: DateTime<Utc>,
+    pub percentile_10: f64,
+    pub mean: f64,
+    pub percentile_90: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ForecastChart {
+    pub history: Vec<PricePoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projection: Option<Vec<ForecastBandPoint>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
