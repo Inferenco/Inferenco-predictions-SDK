@@ -1,15 +1,23 @@
+use std::sync::{OnceLock, RwLock};
+
 use smartcore::linalg::basic::matrix::DenseMatrix;
 use smartcore::svm::Kernels;
 use smartcore::svm::svr::{SVR, SVRParameters};
 use ta::Next;
 use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex};
 
-use crate::dto::{MlForecast, PredictionError, PricePoint, TechnicalSignals};
+use crate::analysis_deep;
+use crate::dto::{
+    CovariatePoint, MlForecast, MlModelConfig, MlModelKind, PredictionError, PricePoint,
+    TechnicalSignals,
+};
 use crate::helpers;
 
-const ROLLING_STANDARDIZATION_WINDOW: usize = 20;
+pub(crate) const ROLLING_STANDARDIZATION_WINDOW: usize = 20;
 
-fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
+static ML_MODEL_CONFIG: OnceLock<RwLock<MlModelConfig>> = OnceLock::new();
+
+pub(crate) fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
     let window_start = end_idx.saturating_add(1).saturating_sub(window);
     let slice = &values[window_start..=end_idx];
     let mean = if slice.is_empty() {
@@ -30,7 +38,7 @@ fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
     (mean, std_dev)
 }
 
-fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64>> {
+pub(crate) fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64>> {
     if raw_features.is_empty() {
         return Vec::new();
     }
@@ -74,7 +82,7 @@ fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64
     standardized
 }
 
-fn standardize_row(raw_row: &[f64], columns: &[Vec<f64>], window: usize) -> Vec<f64> {
+pub(crate) fn standardize_row(raw_row: &[f64], columns: &[Vec<f64>], window: usize) -> Vec<f64> {
     let mut transformed_row = Vec::with_capacity(raw_row.len());
     for (col_idx, value) in raw_row.iter().enumerate() {
         let column = columns.get(col_idx).cloned().unwrap_or_default();
@@ -94,9 +102,46 @@ fn standardize_row(raw_row: &[f64], columns: &[Vec<f64>], window: usize) -> Vec<
     transformed_row
 }
 
-/// Train a lightweight SVR model on the provided history to predict the next price step.
-/// Returns the predicted next price.
+pub fn set_ml_model_config(config: MlModelConfig) {
+    let guard = ML_MODEL_CONFIG.get_or_init(|| RwLock::new(MlModelConfig::default()));
+    if let Ok(mut writer) = guard.write() {
+        *writer = config;
+    }
+}
+
+fn active_ml_model_config() -> MlModelConfig {
+    let guard = ML_MODEL_CONFIG.get_or_init(|| RwLock::new(MlModelConfig::default()));
+    guard
+        .read()
+        .map(|config| config.clone())
+        .unwrap_or_default()
+}
+
 pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, PredictionError> {
+    predict_next_price_ml_with_covariates(history, None)
+}
+
+/// Predict the next price step using the configured ML backend.
+///
+/// When `covariates` are provided, they are aligned by timestamp and passed to
+/// the lightweight MixLinear encoder for contextual signals; otherwise the
+/// baseline price/volume features are used. The active model and hyperparameters
+/// are selected via [`set_ml_model_config`].
+pub fn predict_next_price_ml_with_covariates(
+    history: &[PricePoint],
+    covariates: Option<&[CovariatePoint]>,
+) -> Result<MlForecast, PredictionError> {
+    let config = active_ml_model_config();
+
+    match config.model {
+        MlModelKind::MixLinear => {
+            analysis_deep::predict_next_price_ml_with_covariates(history, covariates, &config)
+        }
+        MlModelKind::LinearSvr => predict_next_price_svr(history),
+    }
+}
+
+fn predict_next_price_svr(history: &[PricePoint]) -> Result<MlForecast, PredictionError> {
     if history.len() < 30 {
         return Err(PredictionError::InsufficientData);
     }

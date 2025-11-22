@@ -100,6 +100,46 @@ pub struct MlForecast {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CovariatePoint {
+    pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub macro_covariates: Vec<f64>,
+    #[serde(default)]
+    pub onchain_covariates: Vec<f64>,
+    #[serde(default)]
+    pub sentiment_covariates: Vec<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum MlModelKind {
+    LinearSvr,
+    MixLinear,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MlModelConfig {
+    pub model: MlModelKind,
+    pub patch_length: usize,
+    pub mixture_components: usize,
+    pub learning_rate: f64,
+    pub validation_window: usize,
+    pub validation_stride: usize,
+}
+
+impl Default for MlModelConfig {
+    fn default() -> Self {
+        Self {
+            model: MlModelKind::MixLinear,
+            patch_length: 8,
+            mixture_components: 3,
+            learning_rate: 0.01,
+            validation_window: 6,
+            validation_stride: 3,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 /// Wrapper for selecting either a short or long forecast horizon.
 ///
