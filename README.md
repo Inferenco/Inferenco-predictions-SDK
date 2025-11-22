@@ -91,6 +91,14 @@ println!("{}", json_response);
       "expected_price": 42350.0,
       "confidence": 0.85,
       // ... other forecast fields
+      "ml_interval_calibration": {
+        "target_coverage": 0.9,
+        "observed_coverage": 0.88,
+        "interval_width": 0.031,
+        "price_interval_width": 1320.0,
+        "pinball_loss": 0.004,
+        "calibration_score": 0.74
+      }
     }
   },
   "chart": {
@@ -117,6 +125,11 @@ println!("{}", json_response);
   }
 }
 ```
+
+ML-backed short forecasts expose `ml_interval_calibration`, reflecting a 90%
+target conformal interval built from rolling, out-of-fold residuals. The
+`calibration_score` replaces the previous heuristic reliability metric and is
+derived from pinball loss against the observed coverage.
 
 ## Run the Example
 

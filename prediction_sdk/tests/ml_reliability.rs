@@ -80,8 +80,10 @@ async fn unreliable_ml_is_downweighted() {
     let trend_adjustment = (drift * time_fraction).exp();
     let base = moving_average(&history, 48) * trend_adjustment;
 
-    let reliability = result.ml_reliability.expect("ml reliability should exist");
-    assert!(reliability < 0.1);
+    let calibration = result
+        .ml_interval_calibration
+        .expect("ml calibration should exist");
+    assert!(calibration.calibration_score < 0.6);
 
     let diff = (result.expected_price - base).abs();
     assert!(diff < base * 0.05 + 1e-6);

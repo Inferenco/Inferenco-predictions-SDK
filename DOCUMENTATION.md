@@ -158,8 +158,15 @@ let result = sdk.forecast(&history, horizon, sentiment).await?;
     decomposition: ForecastDecomposition,
     technical_signals: Option<TechnicalSignals>,
     ml_prediction: Option<f64>,       // Raw ML output (before ensemble)
+    ml_interval_calibration: Option<IntervalCalibration>,
 }
 ```
+
+`confidence` continues to measure short-horizon noise and drift, while
+`ml_interval_calibration` surfaces the probabilistic quality of the ML
+component (calibrated on a 90% target coverage interval). The calibration score
+is derived from pinball loss across rolling out-of-fold residuals rather than a
+heuristic MAE transform.
 
 #### `LongForecastResult`
 ```rust
@@ -171,6 +178,18 @@ let result = sdk.forecast(&history, horizon, sentiment).await?;
     confidence: f32,
     technical_signals: Option<TechnicalSignals>,
     ml_prediction: Option<f64>,
+}
+```
+
+#### `IntervalCalibration`
+```rust
+{
+    target_coverage: f64,            // Desired conformal coverage (default 0.9)
+    observed_coverage: f64,          // Rolling out-of-fold coverage achieved
+    interval_width: f64,             // Return-space interval width
+    price_interval_width: f64,       // Price-space interval width at blend time
+    pinball_loss: f64,               // Quantile loss used for calibration
+    calibration_score: f32,          // Normalized probabilistic quality score
 }
 ```
 

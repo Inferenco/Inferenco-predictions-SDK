@@ -51,7 +51,7 @@ async fn forecast_with_fetch_handles_short_horizon() {
             // Verify advanced features
             assert!(short.technical_signals.is_some());
             assert!(short.ml_prediction.is_some());
-            assert!(short.ml_reliability.is_some());
+            assert!(short.ml_interval_calibration.is_some());
         }
         _ => panic!("expected short forecast"),
     }
