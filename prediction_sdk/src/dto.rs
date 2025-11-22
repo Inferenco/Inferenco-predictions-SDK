@@ -93,10 +93,64 @@ pub struct TechnicalSignals {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MlForecast {
     pub predicted_price: f64,
-    pub reliability: f32,
     pub predicted_return: f64,
     pub lower_return: f64,
     pub upper_return: f64,
+    pub calibration_score: f32,
+    pub target_coverage: f64,
+    pub observed_coverage: f64,
+    pub interval_width: f64,
+    pub pinball_loss: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct IntervalCalibration {
+    pub target_coverage: f64,
+    pub observed_coverage: f64,
+    pub interval_width: f64,
+    pub price_interval_width: f64,
+    pub pinball_loss: f64,
+    pub calibration_score: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CovariatePoint {
+    pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub macro_covariates: Vec<f64>,
+    #[serde(default)]
+    pub onchain_covariates: Vec<f64>,
+    #[serde(default)]
+    pub sentiment_covariates: Vec<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum MlModelKind {
+    LinearSvr,
+    MixLinear,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MlModelConfig {
+    pub model: MlModelKind,
+    pub patch_length: usize,
+    pub mixture_components: usize,
+    pub learning_rate: f64,
+    pub validation_window: usize,
+    pub validation_stride: usize,
+}
+
+impl Default for MlModelConfig {
+    fn default() -> Self {
+        Self {
+            model: MlModelKind::MixLinear,
+            patch_length: 8,
+            mixture_components: 3,
+            learning_rate: 0.01,
+            validation_window: 6,
+            validation_stride: 3,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -182,11 +236,11 @@ pub struct ShortForecastResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_prediction: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ml_reliability: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_return_bounds: Option<(f64, f64)>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_price_interval: Option<(f64, f64)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ml_interval_calibration: Option<IntervalCalibration>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

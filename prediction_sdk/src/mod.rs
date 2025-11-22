@@ -1,5 +1,7 @@
 #[path = "analysis.rs"]
 pub mod analysis;
+#[path = "analysis_deep.rs"]
+pub mod analysis_deep;
 #[path = "cache.rs"]
 pub mod cache;
 #[path = "dto.rs"]

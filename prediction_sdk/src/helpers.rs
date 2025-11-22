@@ -315,6 +315,48 @@ pub(crate) fn percentile(mut values: Vec<f64>, pct: f64) -> Result<f64, Predicti
         .ok_or(PredictionError::InsufficientData)
 }
 
+pub(crate) fn coverage_rate(residuals: &[f64], quantile: f64) -> f64 {
+    if residuals.is_empty() {
+        return 0.0;
+    }
+
+    let covered = residuals
+        .iter()
+        .filter(|residual| **residual <= quantile)
+        .count();
+
+    covered as f64 / residuals.len() as f64
+}
+
+pub(crate) fn pinball_loss(residuals: &[f64], target_quantile: f64, quantile_value: f64) -> f64 {
+    if residuals.is_empty() {
+        return 0.0;
+    }
+
+    let loss_sum: f64 = residuals
+        .iter()
+        .map(|residual| {
+            if *residual >= quantile_value {
+                (1.0 - target_quantile) * (*residual - quantile_value)
+            } else {
+                target_quantile * (quantile_value - residual)
+            }
+        })
+        .sum();
+
+    loss_sum / residuals.len() as f64
+}
+
+pub(crate) fn calibration_score(
+    observed_coverage: f64,
+    target_coverage: f64,
+    pinball_loss: f64,
+) -> f32 {
+    let coverage_gap = (observed_coverage - target_coverage).abs();
+    let penalty = coverage_gap + pinball_loss;
+    (1.0 / (1.0 + penalty)).clamp(0.0, 1.0) as f32
+}
+
 pub(crate) fn weight_with_sentiment(value: f64, sentiment: &SentimentSnapshot) -> f64 {
     let bounded_news = sentiment.news_score.clamp(-1.0, 1.0);
     let bounded_social = sentiment.social_score.clamp(-1.0, 1.0);

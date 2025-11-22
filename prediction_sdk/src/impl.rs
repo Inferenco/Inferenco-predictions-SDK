@@ -23,11 +23,13 @@ use crate::{
     ChartCandle,
     LongForecastHorizon,
     LongForecastResult,
+    IntervalCalibration,
     PredictionError,
     PricePoint,
     SentimentSnapshot,
     ShortForecastHorizon,
     ShortForecastResult,
+    MlModelConfig,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.coingecko.com/api/v3";
@@ -102,6 +104,15 @@ impl PredictionSdk {
             api_cache,
             forecast_cache,
         }
+    }
+
+    /// Override the global ML configuration used by the forecasting pipeline.
+    ///
+    /// This setter is optional and preserves the existing public API while
+    /// exposing the new hyperparameters (patch length, mixture size, and
+    /// learning rate) to callers.
+    pub fn set_ml_config(&self, config: MlModelConfig) {
+        analysis::set_ml_model_config(config);
     }
 
     /// Fetch historical market data in batches to ensure high granularity (hourly) over long periods.
@@ -337,9 +348,10 @@ impl PredictionSdk {
 
         let mut ml_return_bounds = None;
         let mut ml_price_interval = None;
+        let mut ml_interval_calibration = None;
 
         if let Some(ml) = ml_prediction.as_ref() {
-            let reliability = f64::from(ml.reliability);
+            let calibration_score = f64::from(ml.calibration_score);
             let last_price = history
                 .last()
                 .map(|point| point.price)
@@ -354,12 +366,23 @@ impl PredictionSdk {
             };
             let relative_width = interval_width / price_scale;
             let width_penalty = 1.0 / (1.0 + relative_width);
-            let weight = (reliability * width_penalty).clamp(0.0, 1.0);
+            let coverage_alignment =
+                1.0 - (ml.observed_coverage - ml.target_coverage).abs().min(1.0);
+            let weight =
+                (calibration_score * width_penalty * coverage_alignment).clamp(0.0, 1.0);
 
             ml_return_bounds = Some((ml.lower_return, ml.upper_return));
             ml_price_interval = Some((lower_price, upper_price));
+            ml_interval_calibration = Some(IntervalCalibration {
+                target_coverage: ml.target_coverage,
+                observed_coverage: ml.observed_coverage,
+                interval_width: ml.interval_width,
+                price_interval_width: interval_width,
+                pinball_loss: ml.pinball_loss,
+                calibration_score: ml.calibration_score,
+            });
 
-            if reliability >= 0.1 && weight > 0.0 {
+            if calibration_score >= 0.05 && weight > 0.0 {
                 expected_price = baseline_expected * (1.0 - weight)
                     + ml.predicted_price * weight;
             } else {
@@ -374,9 +397,9 @@ impl PredictionSdk {
             decomposition,
             technical_signals,
             ml_prediction: ml_prediction.as_ref().map(|ml| ml.predicted_price),
-            ml_reliability: ml_prediction.as_ref().map(|ml| ml.reliability),
             ml_return_bounds,
             ml_price_interval,
+            ml_interval_calibration,
         })
     }
 

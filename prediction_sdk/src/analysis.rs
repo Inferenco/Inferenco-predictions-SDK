@@ -1,15 +1,25 @@
+use std::sync::{OnceLock, RwLock};
+
+use smartcore::linalg::basic::arrays::Array;
 use smartcore::linalg::basic::matrix::DenseMatrix;
 use smartcore::svm::Kernels;
 use smartcore::svm::svr::{SVR, SVRParameters};
 use ta::Next;
 use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex};
 
-use crate::dto::{MlForecast, PredictionError, PricePoint, TechnicalSignals};
+use crate::analysis_deep;
+use crate::dto::{
+    CovariatePoint, MlForecast, MlModelConfig, MlModelKind, PredictionError, PricePoint,
+    TechnicalSignals,
+};
 use crate::helpers;
 
-const ROLLING_STANDARDIZATION_WINDOW: usize = 20;
+pub(crate) const ROLLING_STANDARDIZATION_WINDOW: usize = 20;
+const TARGET_COVERAGE: f64 = 0.9;
 
-fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
+static ML_MODEL_CONFIG: OnceLock<RwLock<MlModelConfig>> = OnceLock::new();
+
+pub(crate) fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
     let window_start = end_idx.saturating_add(1).saturating_sub(window);
     let slice = &values[window_start..=end_idx];
     let mean = if slice.is_empty() {
@@ -30,7 +40,7 @@ fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
     (mean, std_dev)
 }
 
-fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64>> {
+pub(crate) fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64>> {
     if raw_features.is_empty() {
         return Vec::new();
     }
@@ -74,7 +84,7 @@ fn standardize_features(raw_features: &[Vec<f64>], window: usize) -> Vec<Vec<f64
     standardized
 }
 
-fn standardize_row(raw_row: &[f64], columns: &[Vec<f64>], window: usize) -> Vec<f64> {
+pub(crate) fn standardize_row(raw_row: &[f64], columns: &[Vec<f64>], window: usize) -> Vec<f64> {
     let mut transformed_row = Vec::with_capacity(raw_row.len());
     for (col_idx, value) in raw_row.iter().enumerate() {
         let column = columns.get(col_idx).cloned().unwrap_or_default();
@@ -94,9 +104,79 @@ fn standardize_row(raw_row: &[f64], columns: &[Vec<f64>], window: usize) -> Vec<
     transformed_row
 }
 
-/// Train a lightweight SVR model on the provided history to predict the next price step.
-/// Returns the predicted next price.
+pub fn set_ml_model_config(config: MlModelConfig) {
+    let guard = ML_MODEL_CONFIG.get_or_init(|| RwLock::new(MlModelConfig::default()));
+    if let Ok(mut writer) = guard.write() {
+        *writer = config;
+    }
+}
+
+fn active_ml_model_config() -> MlModelConfig {
+    let guard = ML_MODEL_CONFIG.get_or_init(|| RwLock::new(MlModelConfig::default()));
+    guard
+        .read()
+        .map(|config| config.clone())
+        .unwrap_or_default()
+}
+
+fn rolling_out_of_fold_residuals(
+    standardized_features: &[Vec<f64>],
+    targets: &[f64],
+    params: &SVRParameters<f64>,
+) -> Result<Vec<f64>, PredictionError> {
+    let mut residuals = Vec::new();
+    let min_training = 10.min(standardized_features.len().saturating_sub(1));
+
+    if standardized_features.len() < 2 || targets.len() < 2 {
+        return Ok(residuals);
+    }
+
+    for idx in min_training..standardized_features.len() {
+        let train_x = DenseMatrix::from_2d_vec(&standardized_features[..idx].to_vec());
+        let train_y = targets[..idx].to_vec();
+        if train_x.shape().0 == 0 || train_y.is_empty() {
+            continue;
+        }
+
+        let model = SVR::fit(&train_x, &train_y, params)
+            .map_err(|e| PredictionError::Serialization(format!("ML training failed: {}", e)))?;
+        let validation_matrix = DenseMatrix::from_2d_vec(&vec![standardized_features[idx].clone()]);
+        let predictions = model
+            .predict(&validation_matrix)
+            .map_err(|e| PredictionError::Serialization(format!("ML validation failed: {}", e)))?;
+        let prediction = predictions.first().copied().unwrap_or(0.0);
+        let residual = (prediction - targets[idx]).abs();
+        residuals.push(residual);
+    }
+
+    Ok(residuals)
+}
+
 pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, PredictionError> {
+    predict_next_price_ml_with_covariates(history, None)
+}
+
+/// Predict the next price step using the configured ML backend.
+///
+/// When `covariates` are provided, they are aligned by timestamp and passed to
+/// the lightweight MixLinear encoder for contextual signals; otherwise the
+/// baseline price/volume features are used. The active model and hyperparameters
+/// are selected via [`set_ml_model_config`].
+pub fn predict_next_price_ml_with_covariates(
+    history: &[PricePoint],
+    covariates: Option<&[CovariatePoint]>,
+) -> Result<MlForecast, PredictionError> {
+    let config = active_ml_model_config();
+
+    match config.model {
+        MlModelKind::MixLinear => {
+            analysis_deep::predict_next_price_ml_with_covariates(history, covariates, &config)
+        }
+        MlModelKind::LinearSvr => predict_next_price_svr(history),
+    }
+}
+
+fn predict_next_price_svr(history: &[PricePoint]) -> Result<MlForecast, PredictionError> {
     if history.len() < 30 {
         return Err(PredictionError::InsufficientData);
     }
@@ -187,64 +267,27 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
         return Err(PredictionError::InsufficientData);
     }
 
-    let mut split_idx = (standardized_features.len() as f64 * 0.8).ceil() as usize;
-    if split_idx >= standardized_features.len() {
-        split_idx = standardized_features.len() - 1;
-    }
-
-    let train_x = &standardized_features[..split_idx];
-    let train_y = &y_train[..split_idx];
-
-    let validation_x = &standardized_features[split_idx..];
-    let validation_y = &y_train[split_idx..];
-
-    if train_x.is_empty() || validation_x.is_empty() {
-        return Err(PredictionError::InsufficientData);
-    }
-
-    let train_matrix = DenseMatrix::from_2d_vec(&train_x.to_vec());
-    let train_targets = train_y.to_vec();
     let params = SVRParameters::default()
         .with_c(10.0)
         .with_eps(0.1)
         .with_kernel(Kernels::linear());
-    let trained_model = SVR::fit(&train_matrix, &train_targets, &params)
-        .map_err(|e| PredictionError::Serialization(format!("ML training failed: {}", e)))?;
+    let mut residuals = rolling_out_of_fold_residuals(&standardized_features, &y_train, &params)?;
 
-    let validation_matrix = DenseMatrix::from_2d_vec(&validation_x.to_vec());
-    let validation_predictions = trained_model
-        .predict(&validation_matrix)
-        .map_err(|e| PredictionError::Serialization(format!("ML validation failed: {}", e)))?;
-
-    let mut residuals = Vec::with_capacity(validation_y.len());
-    let mut mae = 0.0;
-    for (predicted, actual) in validation_predictions.iter().zip(validation_y.iter()) {
-        let residual = (predicted - actual).abs();
-        residuals.push(residual);
-        mae += residual;
-    }
-    mae /= validation_y.len() as f64;
-
-    let mut baseline_mae = 0.0;
-    for (idx, actual) in validation_y.iter().enumerate() {
-        if let Some(features) = x_train.get(split_idx + idx) {
-            let naive = *features.first().unwrap_or(&0.0);
-            baseline_mae += (naive - actual).abs();
-        }
-    }
-    baseline_mae /= validation_y.len() as f64;
-
-    if residuals.is_empty() || !mae.is_finite() {
-        return Err(PredictionError::InsufficientData);
-    }
-
-    let improvement = if mae > f64::EPSILON {
-        (baseline_mae / mae).clamp(0.5, 2.0)
+    let mae = if residuals.is_empty() {
+        0.0
     } else {
-        1.0
+        residuals.iter().copied().sum::<f64>() / residuals.len() as f64
     };
-    let error_scale = (45.0 / improvement).max(10.0);
-    let reliability = (1.0 / (1.0 + mae * error_scale)).clamp(0.0, 1.0) as f32;
+
+    if residuals.is_empty() {
+        residuals.push(mae.abs());
+    }
+
+    let conformal_quantile = helpers::percentile(residuals.clone(), TARGET_COVERAGE)?;
+    let observed_coverage = helpers::coverage_rate(&residuals, conformal_quantile);
+    let pinball_loss = helpers::pinball_loss(&residuals, TARGET_COVERAGE, conformal_quantile);
+    let calibration_score =
+        helpers::calibration_score(observed_coverage, TARGET_COVERAGE, pinball_loss);
 
     let full_matrix = DenseMatrix::from_2d_vec(&standardized_features);
     let full_model = SVR::fit(&full_matrix, &y_train, &params)
@@ -309,19 +352,23 @@ pub fn predict_next_price_ml(history: &[PricePoint]) -> Result<MlForecast, Predi
         .predict(&x_new)
         .map_err(|e| PredictionError::Serialization(format!("ML prediction failed: {}", e)))?[0];
 
-    let conformal_quantile = helpers::percentile(residuals, 0.9)?;
     let lower_return = predicted_log_return - conformal_quantile;
     let upper_return = predicted_log_return + conformal_quantile;
+    let interval_width = (upper_return - lower_return).abs();
 
     // Convert back to price
     let predicted_price = last_price * predicted_log_return.exp();
 
     Ok(MlForecast {
         predicted_price,
-        reliability,
         predicted_return: predicted_log_return,
         lower_return,
         upper_return,
+        calibration_score,
+        target_coverage: TARGET_COVERAGE,
+        observed_coverage,
+        interval_width,
+        pinball_loss,
     })
 }
 
