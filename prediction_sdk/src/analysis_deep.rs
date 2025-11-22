@@ -9,6 +9,8 @@ use crate::analysis::{rolling_stats, standardize_features, ROLLING_STANDARDIZATI
 use crate::dto::{CovariatePoint, MlForecast, MlModelConfig, PredictionError, PricePoint};
 use crate::helpers;
 
+const TARGET_COVERAGE: f64 = 0.9;
+
 #[derive(Clone, Debug)]
 struct MixLinearModel {
     weights: Vec<Vec<f64>>, // component -> weight vector
@@ -356,9 +358,15 @@ pub(crate) fn predict_next_price_ml_with_covariates(
         residuals_clone.push(mae.abs());
     }
 
-    let conformal_quantile = helpers::percentile(residuals_clone.clone(), 0.9)?;
+    let conformal_quantile = helpers::percentile(residuals_clone.clone(), TARGET_COVERAGE)?;
+    let observed_coverage = helpers::coverage_rate(&residuals_clone, conformal_quantile);
+    let pinball_loss = helpers::pinball_loss(&residuals_clone, TARGET_COVERAGE, conformal_quantile);
+    let calibration_score =
+        helpers::calibration_score(observed_coverage, TARGET_COVERAGE, pinball_loss);
+
     let lower_return = predicted_return - conformal_quantile;
     let upper_return = predicted_return + conformal_quantile;
+    let interval_width = (upper_return - lower_return).abs();
 
     let last_price = history
         .last()
@@ -366,14 +374,15 @@ pub(crate) fn predict_next_price_ml_with_covariates(
         .ok_or(PredictionError::InsufficientData)?;
     let predicted_price = last_price * predicted_return.exp();
 
-    let reliability_scale = (1.0 + mae.abs() * 45.0).max(1.0);
-    let reliability = (1.0 / reliability_scale).clamp(0.0, 1.0) as f32;
-
     Ok(MlForecast {
         predicted_price,
-        reliability,
         predicted_return,
         lower_return,
         upper_return,
+        calibration_score,
+        target_coverage: TARGET_COVERAGE,
+        observed_coverage,
+        interval_width,
+        pinball_loss,
     })
 }

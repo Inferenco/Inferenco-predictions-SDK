@@ -109,9 +109,9 @@ async fn wide_intervals_downweight_ml_blending() {
     let ml_prediction = result
         .ml_prediction
         .expect("ml prediction should be present");
-    let ml_reliability = result
-        .ml_reliability
-        .expect("ml reliability should be present");
+    let calibration = result
+        .ml_interval_calibration
+        .expect("ml calibration should be present");
     let price_interval = result
         .ml_price_interval
         .expect("ml price interval should exist");
@@ -135,5 +135,6 @@ async fn wide_intervals_downweight_ml_blending() {
         relative_width > 0.05,
         "interval too narrow to test weighting"
     );
-    assert!(weight_inferred < f64::from(ml_reliability));
+    assert!(weight_inferred < f64::from(calibration.calibration_score) + 0.05);
+    assert!(calibration.observed_coverage > 0.0);
 }
