@@ -1,5 +1,6 @@
 use std::sync::{OnceLock, RwLock};
 
+use smartcore::linalg::basic::arrays::Array;
 use smartcore::linalg::basic::matrix::DenseMatrix;
 use smartcore::svm::Kernels;
 use smartcore::svm::svr::{SVR, SVRParameters};
@@ -121,7 +122,7 @@ fn active_ml_model_config() -> MlModelConfig {
 fn rolling_out_of_fold_residuals(
     standardized_features: &[Vec<f64>],
     targets: &[f64],
-    params: &SVRParameters<f64, Kernels<f64>>,
+    params: &SVRParameters<f64>,
 ) -> Result<Vec<f64>, PredictionError> {
     let mut residuals = Vec::new();
     let min_training = 10.min(standardized_features.len().saturating_sub(1));
@@ -141,12 +142,10 @@ fn rolling_out_of_fold_residuals(
             PredictionError::Serialization(format!("ML training failed: {}", e))
         })?;
         let validation_matrix = DenseMatrix::from_2d_vec(&vec![standardized_features[idx].clone()]);
-        let prediction = model
+        let predictions = model
             .predict(&validation_matrix)
-            .map_err(|e| PredictionError::Serialization(format!("ML validation failed: {}", e)))?
-            .get(0)
-            .copied()
-            .unwrap_or(0.0);
+            .map_err(|e| PredictionError::Serialization(format!("ML validation failed: {}", e)))?;
+        let prediction = predictions.first().copied().unwrap_or(0.0);
         let residual = (prediction - targets[idx]).abs();
         residuals.push(residual);
     }
