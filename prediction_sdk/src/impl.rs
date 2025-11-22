@@ -28,6 +28,7 @@ use crate::{
     SentimentSnapshot,
     ShortForecastHorizon,
     ShortForecastResult,
+    MlModelConfig,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.coingecko.com/api/v3";
@@ -102,6 +103,15 @@ impl PredictionSdk {
             api_cache,
             forecast_cache,
         }
+    }
+
+    /// Override the global ML configuration used by the forecasting pipeline.
+    ///
+    /// This setter is optional and preserves the existing public API while
+    /// exposing the new hyperparameters (patch length, mixture size, and
+    /// learning rate) to callers.
+    pub fn set_ml_config(&self, config: MlModelConfig) {
+        analysis::set_ml_model_config(config);
     }
 
     /// Fetch historical market data in batches to ensure high granularity (hourly) over long periods.
