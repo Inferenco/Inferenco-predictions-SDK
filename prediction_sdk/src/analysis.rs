@@ -138,9 +138,8 @@ fn rolling_out_of_fold_residuals(
             continue;
         }
 
-        let model = SVR::fit(&train_x, &train_y, params).map_err(|e| {
-            PredictionError::Serialization(format!("ML training failed: {}", e))
-        })?;
+        let model = SVR::fit(&train_x, &train_y, params)
+            .map_err(|e| PredictionError::Serialization(format!("ML training failed: {}", e)))?;
         let validation_matrix = DenseMatrix::from_2d_vec(&vec![standardized_features[idx].clone()]);
         let predictions = model
             .predict(&validation_matrix)
@@ -272,8 +271,7 @@ fn predict_next_price_svr(history: &[PricePoint]) -> Result<MlForecast, Predicti
         .with_c(10.0)
         .with_eps(0.1)
         .with_kernel(Kernels::linear());
-    let mut residuals =
-        rolling_out_of_fold_residuals(&standardized_features, &y_train, &params)?;
+    let mut residuals = rolling_out_of_fold_residuals(&standardized_features, &y_train, &params)?;
 
     let mae = if residuals.is_empty() {
         0.0

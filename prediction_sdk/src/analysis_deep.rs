@@ -5,7 +5,7 @@ use itertools::Itertools;
 use ta::Next;
 use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex};
 
-use crate::analysis::{rolling_stats, standardize_features, ROLLING_STANDARDIZATION_WINDOW};
+use crate::analysis::{ROLLING_STANDARDIZATION_WINDOW, rolling_stats, standardize_features};
 use crate::dto::{CovariatePoint, MlForecast, MlModelConfig, PredictionError, PricePoint};
 use crate::helpers;
 
@@ -21,7 +21,9 @@ fn covariate_length(point: &CovariatePoint) -> usize {
     point.macro_covariates.len() + point.onchain_covariates.len() + point.sentiment_covariates.len()
 }
 
-fn covariate_map(covariates: Option<&[CovariatePoint]>) -> (BTreeMap<DateTime<Utc>, CovariatePoint>, usize) {
+fn covariate_map(
+    covariates: Option<&[CovariatePoint]>,
+) -> (BTreeMap<DateTime<Utc>, CovariatePoint>, usize) {
     let mut map = BTreeMap::new();
     let mut max_len = 0;
 
@@ -48,7 +50,7 @@ fn covariate_vector(
     }
 
     if expected_len > values.len() {
-        values.extend(std::iter::repeat(0.0).take(expected_len - values.len()));
+        values.extend(std::iter::repeat_n(0.0, expected_len - values.len()));
     }
 
     values
@@ -69,10 +71,13 @@ fn build_feature_rows(
     let mut price_returns = Vec::new();
 
     let lookback = 14;
-    let mut rsi = RelativeStrengthIndex::new(lookback).map_err(|_| PredictionError::InsufficientData)?;
+    let mut rsi =
+        RelativeStrengthIndex::new(lookback).map_err(|_| PredictionError::InsufficientData)?;
     let mut bb = BollingerBands::new(20, 2.0).map_err(|_| PredictionError::InsufficientData)?;
-    let mut ema_short = ExponentialMovingAverage::new(12).map_err(|_| PredictionError::InsufficientData)?;
-    let mut ema_long = ExponentialMovingAverage::new(26).map_err(|_| PredictionError::InsufficientData)?;
+    let mut ema_short =
+        ExponentialMovingAverage::new(12).map_err(|_| PredictionError::InsufficientData)?;
+    let mut ema_long =
+        ExponentialMovingAverage::new(26).map_err(|_| PredictionError::InsufficientData)?;
 
     let mut previous_macd = 0.0;
 
@@ -148,10 +153,7 @@ fn build_feature_rows(
 }
 
 fn softmax(logits: &[f64]) -> Vec<f64> {
-    let max_logit = logits
-        .iter()
-        .cloned()
-        .fold(f64::NEG_INFINITY, f64::max);
+    let max_logit = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let exp_values: Vec<f64> = logits
         .iter()
         .map(|logit| (logit - max_logit).exp())
@@ -204,10 +206,7 @@ fn train_mix_linear(
     targets: &[f64],
     config: &MlModelConfig,
 ) -> MixLinearModel {
-    let input_dim = inputs
-        .first()
-        .map(|row| row.len())
-        .unwrap_or_default();
+    let input_dim = inputs.first().map(|row| row.len()).unwrap_or_default();
     let components = config.mixture_components.max(1);
     let learning_rate = (config.learning_rate).clamp(1e-4, 0.05);
 
