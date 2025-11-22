@@ -37,3 +37,25 @@ candles alongside the forecast. Each entry contains `timestamp`, `open`,
 `high`, `low`, `close`, and an optional `volume` if the upstream endpoint
 provides it. The SDK will call CoinGecko's `/ohlc` endpoint when available or
 derive the candle values from the fetched market chart data.
+
+## Backtesting Examples
+
+Validate prediction accuracy and trading strategies using historical data.
+
+*   **Simple Backtest (Walk-Forward Accuracy):**
+    ```bash
+    cargo run --example simple_backtest
+    ```
+    Measures MAE, RMSE, MAPE, and directional accuracy.
+
+*   **Trading Strategy Backtest:**
+    ```bash
+    cargo run --example trading_strategy_backtest
+    ```
+    Simulates trading based on ML predictions, tracks P&L, win rate, and drawdown.
+
+*   **ML Validation Backtest:**
+    ```bash
+    cargo run --example ml_validation_backtest
+    ```
+    Validates prediction interval coverage and reliability calibration.

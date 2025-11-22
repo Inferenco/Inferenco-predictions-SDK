@@ -1375,6 +1375,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
+name = "ordered-float"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f4779c6901a562440c3786d08192c6fbda7c1c2060edd10006b05ee35d10f2d"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2032,14 +2041,15 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smartcore"
-version = "0.3.2"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42ca1fcd851ada8834d3dfcd088850dc8c703bde50c2baccd89181b74dc3ade"
+checksum = "750e34a2b0dba219ceb802732b1d743ecc82140396b5bd6b3c1e971a09984184"
 dependencies = [
  "approx",
  "cfg-if",
  "num",
  "num-traits",
+ "ordered-float",
  "rand 0.8.5",
 ]
 

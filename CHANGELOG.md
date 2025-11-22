@@ -1,6 +1,14 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to the Prediction SDK will be documented here.
+
+## [Unreleased]
+
+### Added
+- **Backtesting Examples**: Three comprehensive examples for strategy validation
+  - `simple_backtest.rs`: Walk-forward accuracy testing with MAE, RMSE, MAPE, and directional accuracy metrics
+  - `trading_strategy_backtest.rs`: Trading simulation with P&L tracking, win rate, max drawdown, and comparison to buy-and-hold
+  - `ml_validation_backtest.rs`: Statistical validation of ML prediction intervals and reliability calibration
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
