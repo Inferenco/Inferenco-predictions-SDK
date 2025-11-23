@@ -445,14 +445,19 @@ impl PredictionSdk {
             }
         }
 
-        let volatility_path = helpers::forecast_volatility_series(history, days)?;
+        // Scale volatility to account for crypto "unknown unknowns" and long-tail risks
+        let volatility_path: Vec<f64> = helpers::forecast_volatility_series(history, days)?
+            .into_iter()
+            .map(|v| v * 1.5)
+            .collect();
+
         let paths = helpers::run_monte_carlo(
             history,
             days,
             simulations,
             drift,
             &volatility_path,
-            Some(0.005), // Reduced from 0.02 to avoid excessive bearish pull
+            Some(0.001), // Reduced from 0.005 to allow for stronger trends
             chart,
         )?;
         let mean_price = paths.final_prices.iter().sum::<f64>() / paths.final_prices.len() as f64;
