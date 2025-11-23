@@ -17,7 +17,7 @@ Add `prediction_sdk` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-prediction_sdk = "0.1.0"
+prediction_sdk = "0.1.5"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -158,10 +158,12 @@ The SDK uses a **hybrid ensemble approach**:
 - **Trend Strength**: Proxy based on MACD normalized by price
 
 ### 3. Machine Learning
-- **Model**: Support Vector Regressor (SVR) with linear kernel
-- **Features**: Lagged log returns (t-1, t-2) + normalized RSI
-- **Training**: On-the-fly using last 30+ price points
-- **Prediction**: Next-step log return, converted back to price
+- **Model**: Mixture of Linear Experts (MixLinear)
+- **Architecture**: Gated mixture of multiple linear models trained via gradient descent.
+- **Features**: Lagged log returns, normalized RSI, volume volatility ratio, Bollinger Band width, MACD slope, trend strength.
+- **Training**: On-the-fly using rolling validation windows.
+- **Prediction**: Next-step log return, converted back to price.
+
 
 ### 4. Ensemble
 For short-term forecasts:
@@ -171,8 +173,9 @@ final_price = (statistical_forecast + ml_forecast) / 2
 
 ### 5. Confidence Scoring
 ```
-confidence = 1.0 / (1.0 + 100 * volatility * sqrt(horizon_hours))
+confidence = 1.0 / (1.0 + 15 * (0.6 * volatility + 0.4 * noise) * sqrt(horizon_hours))
 ```
+
 
 Confidence decreases with:
 - Higher volatility
@@ -709,22 +712,27 @@ if tool_name == "get_crypto_forecast" {
 
 ## Dependencies
 
+
 ```toml
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 governor = "0.6"
+itertools = "0.12"
 moka = { version = "0.12", features = ["future"] }
 nonzero_ext = "0.3"
+rand = "0.8"
+rand_distr = "0.4"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-smartcore = { version = "0.3", default-features = true }
-statrs = "^0.16"
+smartcore = "0.3"
+statrs = "0.16"
 ta = "0.5"
-thiserror = "^1.0"
-tokio = { version = "1", features = ["full"] }
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
 ndarray = "0.15"
 ```
+
 
 
 ```bash

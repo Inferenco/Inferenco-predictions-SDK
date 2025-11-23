@@ -1,5 +1,10 @@
 # Inferenco Predictions SDK
 
+[![CI](https://github.com/your-org/Inferenco-predictions-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/Inferenco-predictions-SDK/actions)
+[![Crates.io](https://img.shields.io/crates/v/prediction_sdk.svg)](https://crates.io/crates/prediction_sdk)
+[![Documentation](https://docs.rs/prediction_sdk/badge.svg)](https://docs.rs/prediction_sdk)
+
+
 A Rust library for cryptocurrency price forecasting that combines statistical methods, technical analysis, and machine learning.
 
 ## Projects using this SDK
@@ -14,7 +19,8 @@ A Rust library for cryptocurrency price forecasting that combines statistical me
 - **Two-Tier Caching**: Smart TTL-based caching for API responses and forecasts
 - **Rate Limiting**: Built-in token bucket + exponential backoff for CoinGecko API
 - **Technical Analysis**: RSI, MACD, Bollinger Bands
-- **Local AI**: On-the-fly SmartCore SVR training (no external models needed)
+- **Local AI**: On-the-fly Mixture of Linear Experts (MixLinear) training
+
 
 ## Installation
 
@@ -22,7 +28,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-prediction_sdk = "0.1.0"
+prediction_sdk = "0.1.5"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -137,7 +143,17 @@ derived from pinball loss against the observed coverage.
 cargo run --example real_world_test
 ```
 
-## Documentation
+
+## MCP Integration
+
+This SDK is designed to be easily integrated into Model Context Protocol (MCP) servers as a tool.
+
+- **Tool Name**: `get_crypto_forecast`
+- **Functionality**: Provides short/long term price forecasts and optional chart data.
+- **Integration**: Use `run_prediction_handler` to process tool arguments and return the JSON result directly.
+
+See the [MCP Integration Guide](DOCUMENTATION.md#mcp-integration) in the documentation for the full JSON schema and Rust implementation details.
+
 
 See [DOCUMENTATION.md](DOCUMENTATION.md) for detailed architecture, API reference, and integration guides.
 
