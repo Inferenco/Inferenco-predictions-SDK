@@ -1,6 +1,6 @@
 # Inferenco Predictions SDK
 
-[![CI](https://github.com/your-org/Inferenco-predictions-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/Inferenco-predictions-SDK/actions)
+[![CI](https://github.com/Inferenco/Inferenco-predictions-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/Inferenco/Inferenco-predictions-SDK/actions)
 [![Crates.io](https://img.shields.io/crates/v/prediction_sdk.svg)](https://crates.io/crates/prediction_sdk)
 [![Documentation](https://docs.rs/prediction_sdk/badge.svg)](https://docs.rs/prediction_sdk)
 
