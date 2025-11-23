@@ -34,7 +34,7 @@ use crate::{
 
 const DEFAULT_BASE_URL: &str = "https://api.coingecko.com/api/v3";
 const DEFAULT_SIMULATIONS: usize = 100_000;
-const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 90;
+const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 7;
 
 pub struct PredictionSdk {
     client: Client,
@@ -59,6 +59,8 @@ impl PredictionSdk {
     /// ```
     pub fn new() -> Result<Self, PredictionError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .map_err(|err| PredictionError::Network(err.to_string()))?;
         // Rate limit: 8 requests per second (burst 8)
@@ -210,6 +212,17 @@ impl PredictionSdk {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<PricePoint>, PredictionError> {
+        let cache_key = ApiCacheKey::DateRange {
+            asset_id: asset_id.to_string(),
+            vs_currency: vs_currency.to_string(),
+            from_ts: from.timestamp(),
+            to_ts: to.timestamp(),
+        };
+
+        if let Some(cached) = self.api_cache.get(&cache_key).await {
+            return Ok(cached);
+        }
+
         let url = format!(
             "{}/coins/{}/market_chart/range",
             self.market_base_url, asset_id
@@ -220,7 +233,9 @@ impl PredictionSdk {
             ("to", to.timestamp().to_string()),
         ];
 
-        self.request_market_chart(url, query).await
+        let result = self.request_market_chart(url, query).await?;
+        self.api_cache.insert(cache_key, result.clone()).await;
+        Ok(result)
     }
 
     /// Fetch chart-ready OHLC data. Attempts to use the dedicated CoinGecko
@@ -336,13 +351,7 @@ impl PredictionSdk {
         let technical_signals = analysis::calculate_technical_signals(history).ok();
         
         // Run ML prediction
-        let ml_prediction = match analysis::predict_next_price_ml(history) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("ML Prediction failed: {}", e);
-                None
-            }
-        };
+        let ml_prediction = analysis::predict_next_price_ml(history).ok();
 
         let baseline_expected = expected_price;
 

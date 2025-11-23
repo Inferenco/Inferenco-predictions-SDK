@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use chrono::{Duration, Utc};
 
 use crate::{
@@ -5,7 +7,18 @@ use crate::{
     PredictionError, PredictionSdk, SentimentSnapshot, helpers,
 };
 
-const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 90;
+const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 7;
+
+fn shared_sdk() -> Result<&'static PredictionSdk, PredictionError> {
+    static SDK: OnceLock<PredictionSdk> = OnceLock::new();
+
+    if let Some(sdk) = SDK.get() {
+        return Ok(sdk);
+    }
+
+    let sdk = PredictionSdk::new()?;
+    Ok(SDK.get_or_init(|| sdk))
+}
 
 /// Execute a forecast based on a [`ForecastRequest`], returning serialized JSON.
 ///
@@ -43,7 +56,7 @@ const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 90;
 /// # }
 /// ```
 pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, PredictionError> {
-    let sdk = PredictionSdk::new()?;
+    let sdk = shared_sdk()?;
     let sentiment = request.sentiment.unwrap_or(SentimentSnapshot {
         news_score: 0.0,
         social_score: 0.0,
