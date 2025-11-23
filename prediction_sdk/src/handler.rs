@@ -5,7 +5,7 @@ use crate::{
     PredictionError, PredictionSdk, SentimentSnapshot, helpers,
 };
 
-const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 30;
+const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 90;
 
 /// Execute a forecast based on a [`ForecastRequest`], returning serialized JSON.
 ///

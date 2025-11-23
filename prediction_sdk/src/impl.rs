@@ -33,7 +33,7 @@ use crate::{
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.coingecko.com/api/v3";
-const DEFAULT_SIMULATIONS: usize = 256;
+const DEFAULT_SIMULATIONS: usize = 100_000;
 const SHORT_FORECAST_LOOKBACK_DAYS: u32 = 90;
 
 pub struct PredictionSdk {
@@ -419,7 +419,23 @@ impl PredictionSdk {
     ) -> Result<(LongForecastResult, Option<Vec<ForecastBandPoint>>), PredictionError> {
         let days = helpers::long_horizon_days(horizon);
         let simulations = helpers::scaled_simulation_count(days, DEFAULT_SIMULATIONS);
-        let (drift, _) = helpers::daily_return_stats(history)?;
+        let (mut drift, _) = helpers::daily_return_stats(history)?;
+
+        // Integrate ML prediction to bias the drift
+        // We use the short-term ML prediction to nudge the long-term drift.
+        // This allows immediate market momentum to influence the long-term trajectory,
+        // but we cap the weight to prevent short-term volatility from dominating.
+        let ml_prediction = analysis::predict_next_price_ml(history);
+        if let Ok(ml) = ml_prediction {
+            let calibration_score = f64::from(ml.calibration_score);
+            if calibration_score > 0.05 {
+                // Weight is based on calibration score, but capped conservatively (e.g., 10%)
+                // because we are projecting a short-term signal over a long horizon.
+                let weight = (calibration_score * 0.2).clamp(0.0, 0.1);
+                drift = drift * (1.0 - weight) + ml.predicted_return * weight;
+            }
+        }
+
         let volatility_path = helpers::forecast_volatility_series(history, days)?;
         let paths = helpers::run_monte_carlo(
             history,
@@ -491,7 +507,7 @@ impl PredictionSdk {
                 percentile_90,
                 confidence,
                 technical_signals,
-                ml_prediction: Some(mean_price),
+                ml_prediction: None,  // Long forecasts use Monte Carlo, not ML
             },
             projection,
         ))
