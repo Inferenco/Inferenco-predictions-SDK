@@ -10,6 +10,7 @@
 6. [Configuration](#configuration)
 7. [MCP Integration](#mcp-integration)
 
+
 ## Installation
 
 Add `prediction_sdk` to your `Cargo.toml`:
@@ -26,6 +27,104 @@ Or use `cargo add`:
 cargo add prediction_sdk
 cargo add tokio --features full
 ```
+
+## Usage Guide
+
+This guide covers the most common ways to request forecasts using the SDK.
+
+### 1. Short-Term Forecasts
+Short-term forecasts (15m, 1h, 4h) use a hybrid ensemble of statistical models and Machine Learning.
+
+**Rust Example:**
+```rust
+use prediction_sdk::{PredictionSdk, ForecastHorizon, ShortForecastHorizon, ForecastResult};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let sdk = PredictionSdk::new()?;
+    
+    // Request a 1-hour forecast for Bitcoin
+    let horizon = ForecastHorizon::Short(ShortForecastHorizon::OneHour);
+    let result = sdk.forecast_with_fetch("bitcoin", "usd", horizon, None).await?;
+
+    if let ForecastResult::Short(forecast) = result {
+        println!("Expected Price: ${:.2}", forecast.expected_price);
+        println!("Confidence: {:.1}%", forecast.confidence * 100.0);
+    }
+    Ok(())
+}
+```
+
+### 2. Long-Term Forecasts
+Long-term forecasts (1d to 4y) rely on Monte Carlo simulations to project future price paths.
+
+**Rust Example:**
+```rust
+use prediction_sdk::{PredictionSdk, ForecastHorizon, LongForecastHorizon, ForecastResult};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let sdk = PredictionSdk::new()?;
+
+    // Request a 1-year forecast for Stohn Coin
+    let horizon = ForecastHorizon::Long(LongForecastHorizon::OneYear);
+    let result = sdk.forecast_with_fetch("stohn-coin", "usd", horizon, None).await?;
+
+    if let ForecastResult::Long(forecast) = result {
+        println!("Mean Price: ${:.2}", forecast.mean_price);
+        println!("Bullish Case (90th): ${:.2}", forecast.percentile_90);
+        println!("Bearish Case (10th): ${:.2}", forecast.percentile_10);
+    }
+    Ok(())
+}
+```
+
+### 3. Forecasts with Chart Data
+To receive historical OHLC candles and (for long-term) projected paths alongside the forecast, you can use the `run_prediction_handler`. This is particularly useful for APIs or UIs that need to render a chart.
+
+**Rust Example (using Handler):**
+```rust
+use prediction_sdk::{ForecastRequest, ForecastHorizon, ShortForecastHorizon, run_prediction_handler};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let request = ForecastRequest {
+        asset_id: "bitcoin".to_string(),
+        vs_currency: "usd".to_string(),
+        horizon: ForecastHorizon::Short(ShortForecastHorizon::FifteenMinutes),
+        sentiment: None,
+        chart: true, // <--- Enable chart data
+    };
+
+    // Returns a JSON string containing both 'forecast' and 'chart' objects
+    let json_response = run_prediction_handler(request).await?;
+    println!("{}", json_response);
+    Ok(())
+}
+```
+
+**JSON Request Structure:**
+If you are interfacing with the SDK via an API or MCP, your JSON payload would look like this:
+
+**Without Chart (Default):**
+```json
+{
+  "asset_id": "bitcoin",
+  "vs_currency": "usd",
+  "horizon": { "type": "short", "value": "one_hour" }
+}
+```
+
+**With Chart:**
+```json
+{
+  "asset_id": "bitcoin",
+  "vs_currency": "usd",
+  "horizon": { "type": "short", "value": "one_hour" },
+  "chart": true
+}
+```
+
 
 
 ## Architecture Overview
@@ -531,6 +630,83 @@ match run_prediction_handler(request_json).await {
 }
 ```
 
+
+### Adding to an MCP Server
+
+To expose this SDK as a tool in your Model Context Protocol (MCP) server, you need to define the tool schema and handle the execution request.
+
+#### 1. Tool Definition (JSON Schema)
+Define the tool in your server's list of available tools:
+
+```json
+{
+  "name": "get_crypto_forecast",
+  "description": "Get price forecasts for cryptocurrencies (e.g., bitcoin, ethereum) for various time horizons. Supports short-term (15m, 1h, 4h) and long-term (1d to 4y) predictions. Can optionally return historical chart data.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "asset_id": {
+        "type": "string",
+        "description": "CoinGecko asset ID (e.g., 'bitcoin', 'ethereum', 'stohn-coin')"
+      },
+      "vs_currency": {
+        "type": "string",
+        "description": "Quote currency (default: 'usd')",
+        "default": "usd"
+      },
+      "horizon": {
+        "type": "object",
+        "description": "Forecast horizon. Choose EITHER 'short' OR 'long'.",
+        "properties": {
+          "short": {
+            "type": "string",
+            "enum": ["fifteen_minutes", "one_hour", "four_hours"]
+          },
+          "long": {
+            "type": "string",
+            "enum": ["one_day", "three_days", "one_week", "one_month", "three_months", "six_months", "one_year", "four_years"]
+          }
+        },
+        "oneOf": [
+          { "required": ["short"] },
+          { "required": ["long"] }
+        ]
+      },
+      "chart": {
+        "type": "boolean",
+        "description": "If true, returns historical OHLC candles and projection data for charting.",
+        "default": false
+      }
+    },
+    "required": ["asset_id", "horizon"]
+  }
+}
+```
+
+#### 2. Handling the Tool Call (Rust)
+In your MCP server's execution loop, match the tool name and pass the arguments to the SDK handler:
+
+```rust
+use prediction_sdk::{run_prediction_handler, ForecastRequest};
+
+// Inside your tool execution logic:
+if tool_name == "get_crypto_forecast" {
+    // 1. Deserialize arguments into ForecastRequest
+    let request: ForecastRequest = serde_json::from_value(arguments)?;
+    
+    // 2. Run the prediction handler
+    // The handler returns a JSON string directly, which is what MCP expects for the result
+    let result_json = run_prediction_handler(request).await?;
+    
+    // 3. Return the result
+    return Ok(CallToolResult {
+        content: vec![Content::Text(result_json)],
+        is_error: false,
+    });
+}
+```
+
+
 ## Dependencies
 
 ```toml
@@ -550,7 +726,6 @@ tokio = { version = "1", features = ["full"] }
 ndarray = "0.15"
 ```
 
-## Testing
 
 ```bash
 # All tests
