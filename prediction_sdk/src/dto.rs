@@ -58,6 +58,8 @@ pub enum LongForecastHorizon {
     ThreeMonths,
     SixMonths,
     OneYear,
+    TwoYears,
+    ThreeYears,
     FourYears,
 }
 

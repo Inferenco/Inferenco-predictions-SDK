@@ -617,7 +617,7 @@ impl PredictionSdk {
             }
             ForecastHorizon::Long(long_horizon) => {
                 let now = Utc::now();
-                let lookback_days = helpers::long_horizon_days(long_horizon);
+                let lookback_days = helpers::long_horizon_days(long_horizon).min(365);
                 let start = now - Duration::days(i64::from(lookback_days));
                 let history = self
                     .fetch_price_history_range(asset_id, vs_currency, start, now)

@@ -6,7 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+
+## [0.1.7] - 2025-11-24
+
+### Added
+- **New Forecast Horizons**: Added `TwoYears` and `ThreeYears` to `LongForecastHorizon` enum for more granular long-term forecasting options.
+  - 2-year forecasts: 720 days duration
+  - 3-year forecasts: 1,080 days duration
+- **New Examples**: Created `aptos_2y.rs` and `aptos_4y.rs` examples demonstrating multi-year forecasts.
+
+### Fixed
+- **Clippy Warning**: Suppressed `clippy::collapsible_if` warning in `src/analysis.rs` with `#[allow]` attribute (requires unstable Rust feature for proper fix).
+- **API 401 Errors**: Capped historical data requests at 365 days maximum to respect CoinGecko free tier limits.
+  - Prevents 401 Unauthorized errors on forecasts exceeding 1 year.
+  - Long-term forecasts (2-4 years) now train on 1 year of history and project forward accordingly.
+
+### Changed
+- **Dependency Cleanup**: Removed unused dependencies (`smartcore`, `ndarray`) and cleaned up `moka` features.
+
 ## [0.1.6] - 2025-11-24
+
 
 ### Changed
 - **Volatility Tuning**: Updated Monte Carlo simulation parameters for long-term forecasts.

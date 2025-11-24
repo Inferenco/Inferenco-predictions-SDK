@@ -26,6 +26,8 @@ pub(crate) fn long_horizon_days(horizon: LongForecastHorizon) -> u32 {
         LongForecastHorizon::ThreeMonths => 3 * 30,
         LongForecastHorizon::SixMonths => 6 * 30,
         LongForecastHorizon::OneYear => 12 * 30,
+        LongForecastHorizon::TwoYears => 24 * 30,
+        LongForecastHorizon::ThreeYears => 36 * 30,
         LongForecastHorizon::FourYears => 48 * 30,
     }
 }
