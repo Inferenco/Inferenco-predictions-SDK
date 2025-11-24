@@ -5,14 +5,18 @@ use itertools::Itertools;
 use ta::Next;
 use ta::indicators::{BollingerBands, ExponentialMovingAverage, RelativeStrengthIndex};
 
-use crate::analysis::{ROLLING_STANDARDIZATION_WINDOW, rolling_stats, standardize_features};
+use crate::analysis::{
+    CachedModelData, MixLinearModelCache, ModelCacheKey, ROLLING_STANDARDIZATION_WINDOW,
+    get_cached_model, ml_config_hash, ml_data_hash, rolling_stats, standardize_features,
+    store_cached_model,
+};
 use crate::dto::{CovariatePoint, MlForecast, MlModelConfig, PredictionError, PricePoint};
 use crate::helpers;
 
 const TARGET_COVERAGE: f64 = 0.9;
 
 #[derive(Clone, Debug)]
-struct MixLinearModel {
+pub(crate) struct MixLinearModel {
     weights: Vec<Vec<f64>>, // component -> weight vector
     biases: Vec<f64>,
 }
@@ -323,6 +327,10 @@ pub(crate) fn predict_next_price_ml_with_covariates(
     covariates: Option<&[CovariatePoint]>,
     config: &MlModelConfig,
 ) -> Result<MlForecast, PredictionError> {
+    let data_hash = ml_data_hash(history, covariates);
+    let config_hash = ml_config_hash(config);
+    let cache_key = ModelCacheKey::new(config.model.clone(), config_hash, data_hash);
+
     let (feature_rows, targets) = build_feature_rows(history, covariates)?;
     let standardized_rows = standardize_features(&feature_rows, ROLLING_STANDARDIZATION_WINDOW);
 
@@ -335,6 +343,48 @@ pub(crate) fn predict_next_price_ml_with_covariates(
 
     if patches.is_empty() {
         return Err(PredictionError::InsufficientData);
+    }
+
+    if let Some(CachedModelData::Mix(cached)) = get_cached_model(&cache_key) {
+        let mut forecast_window: Vec<Vec<f64>> = standardized_rows
+            .iter()
+            .rev()
+            .take(config.patch_length)
+            .cloned()
+            .collect_vec();
+        forecast_window.reverse();
+        if forecast_window.len() < config.patch_length {
+            return Err(PredictionError::InsufficientData);
+        }
+        let flattened: Vec<f64> = forecast_window.into_iter().flatten().collect();
+        let predicted_return = predict_mix_linear(&cached.model, &flattened);
+
+        let conformal_quantile = cached.conformal_quantile;
+        let observed_coverage = cached.observed_coverage;
+        let pinball_loss = cached.pinball_loss;
+        let calibration_score = cached.calibration_score;
+
+        let lower_return = predicted_return - conformal_quantile;
+        let upper_return = predicted_return + conformal_quantile;
+        let interval_width = (upper_return - lower_return).abs();
+
+        let last_price = history
+            .last()
+            .map(|point| point.price)
+            .ok_or(PredictionError::InsufficientData)?;
+        let predicted_price = last_price * predicted_return.exp();
+
+        return Ok(MlForecast {
+            predicted_price,
+            predicted_return,
+            lower_return,
+            upper_return,
+            calibration_score,
+            target_coverage: cached.target_coverage,
+            observed_coverage,
+            interval_width,
+            pinball_loss,
+        });
     }
 
     let (model, residuals, mae) = rolling_validation(&patches, &patch_targets, config);
@@ -372,6 +422,18 @@ pub(crate) fn predict_next_price_ml_with_covariates(
         .map(|point| point.price)
         .ok_or(PredictionError::InsufficientData)?;
     let predicted_price = last_price * predicted_return.exp();
+
+    store_cached_model(
+        cache_key,
+        CachedModelData::Mix(MixLinearModelCache {
+            model: model.clone(),
+            conformal_quantile,
+            observed_coverage,
+            pinball_loss,
+            calibration_score,
+            target_coverage: TARGET_COVERAGE,
+        }),
+    );
 
     Ok(MlForecast {
         predicted_price,

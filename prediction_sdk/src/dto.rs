@@ -124,9 +124,8 @@ pub struct CovariatePoint {
     pub sentiment_covariates: Vec<f64>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum MlModelKind {
-    LinearSvr,
     MixLinear,
 }
 

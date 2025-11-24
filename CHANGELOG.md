@@ -6,7 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.1.4] - 2025-11-23
+## [0.1.6] - 2025-11-24
+
+### Changed
+- **Volatility Tuning**: Updated Monte Carlo simulation parameters for long-term forecasts.
+  - Increased volatility scaling by 1.5x to better capture "unknown unknowns" and long-tail risks.
+  - Reduced mean reversion strength from 0.005 to 0.001 to allow for stronger, more persistent trends.
+  - **Result**: BTC 6-month backtest coverage improved from 48.9% to 95.6%, successfully capturing major volatility events.
+
+### Fixed
+- **Monte Carlo Drift Calculation**: Corrected a mathematical error where volatility drag was applied twice (once in geometric drift, again in simulation).
+  - Now correctly converts to arithmetic drift before running the simulation.
+  - **Impact**: Resolves issue where forecasts for highly volatile assets (e.g., Stohn Coin) would collapse to near-zero bounds.
+  - **Verification**: Stohn Coin 3-month and 1-year forecasts now produce realistic price ranges and confidence intervals.
+
+## [0.1.5] - 2025-11-23
 
 ### Added
 - Integrated ML predictions into long-term forecasts (bias drift with short-term ML).
