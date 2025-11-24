@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.8] - 2025-11-24
+
+### Fixed
+- **MCP Server 401 Errors**: Applied 365-day history cap to `handler.rs` (used by `run_prediction_handler()`).
+  - Previously only fixed in `impl.rs` (used by `forecast_with_fetch()`).
+  - MCP servers calling `run_prediction_handler()` were still hitting 401 errors on multi-year forecasts.
+  - Both code paths now respect the 365-day maximum for CoinGecko free tier.
+
 ## [0.1.7] - 2025-11-24
+
 
 ### Added
 - **New Forecast Horizons**: Added `TwoYears` and `ThreeYears` to `LongForecastHorizon` enum for more granular long-term forecasting options.

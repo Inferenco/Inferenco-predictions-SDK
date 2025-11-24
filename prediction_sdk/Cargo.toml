@@ -1,6 +1,6 @@
 [package]
 name = "prediction_sdk"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["Inferenco Team"]
 description = "Advanced cryptocurrency forecasting SDK combining statistical models, machine learning (SVR), and technical analysis with intelligent caching and rate limiting"

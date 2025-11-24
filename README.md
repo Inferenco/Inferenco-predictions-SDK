@@ -28,7 +28,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-prediction_sdk = "0.1.7"
+prediction_sdk = "0.1.8"
 tokio = { version = "1", features = ["full"] }
 ```
 

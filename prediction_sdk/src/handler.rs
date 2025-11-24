@@ -100,7 +100,7 @@ pub async fn run_prediction_handler(request: ForecastRequest) -> Result<String, 
         }
         ForecastHorizon::Long(horizon) => {
             let now = Utc::now();
-            let lookback_days = helpers::long_horizon_days(horizon);
+            let lookback_days = helpers::long_horizon_days(horizon).min(365);
             let start = now - Duration::days(i64::from(lookback_days));
             let history = sdk
                 .fetch_price_history_range(&request.asset_id, &request.vs_currency, start, now)
