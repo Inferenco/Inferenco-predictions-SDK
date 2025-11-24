@@ -1,5 +1,5 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
@@ -71,10 +71,7 @@ pub(crate) fn ml_config_hash(config: &MlModelConfig) -> u64 {
     hasher.finish()
 }
 
-pub(crate) fn ml_data_hash(
-    history: &[PricePoint],
-    covariates: Option<&[CovariatePoint]>,
-) -> u64 {
+pub(crate) fn ml_data_hash(history: &[PricePoint], covariates: Option<&[CovariatePoint]>) -> u64 {
     let mut hasher = DefaultHasher::new();
     history.len().hash(&mut hasher);
     for point in history.iter().rev().take(128) {
@@ -136,10 +133,7 @@ pub(crate) fn clear_model_cache() {
 
 #[cfg(test)]
 pub(crate) fn model_cache_len() -> usize {
-    model_cache()
-        .read()
-        .map(|guard| guard.len())
-        .unwrap_or(0)
+    model_cache().read().map(|guard| guard.len()).unwrap_or(0)
 }
 
 pub(crate) fn rolling_stats(values: &[f64], end_idx: usize, window: usize) -> (f64, f64) {
