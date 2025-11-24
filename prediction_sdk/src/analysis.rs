@@ -102,6 +102,7 @@ pub(crate) fn get_cached_model(key: &ModelCacheKey) -> Option<CachedModelData> {
     let cache = model_cache();
     let now = Instant::now();
     if let Ok(mut guard) = cache.write() {
+        #[allow(clippy::collapsible_if)]
         if let Some(entry) = guard.get(key) {
             if now.duration_since(entry.stored_at) <= MODEL_CACHE_TTL {
                 return Some(entry.model.clone());
