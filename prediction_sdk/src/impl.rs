@@ -428,7 +428,7 @@ impl PredictionSdk {
     ) -> Result<(LongForecastResult, Option<Vec<ForecastBandPoint>>), PredictionError> {
         let days = helpers::long_horizon_days(horizon);
         let simulations = helpers::scaled_simulation_count(days, DEFAULT_SIMULATIONS);
-        let (mut drift, _) = helpers::daily_return_stats(history)?;
+        let (mut drift, historical_volatility) = helpers::daily_return_stats(history)?;
 
         // Integrate ML prediction to bias the drift
         // We use the short-term ML prediction to nudge the long-term drift.
@@ -451,11 +451,17 @@ impl PredictionSdk {
             .map(|v| v * 1.5)
             .collect();
 
+        // Convert geometric drift (returned by daily_return_stats) to arithmetic drift
+        // for the simulation. The simulation subtracts (sigma^2 / 2) internally, so we
+        // need to provide the "raw" arithmetic mean to avoid double-counting the drag.
+        // Arithmetic Drift = Geometric Drift + (Sigma^2 / 2)
+        let arithmetic_drift = drift + (historical_volatility.powi(2) / 2.0);
+
         let paths = helpers::run_monte_carlo(
             history,
             days,
             simulations,
-            drift,
+            arithmetic_drift,
             &volatility_path,
             Some(0.001), // Reduced from 0.005 to allow for stronger trends
             chart,
