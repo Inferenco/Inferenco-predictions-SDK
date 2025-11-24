@@ -79,6 +79,8 @@ impl ForecastCacheKey {
                 LongForecastHorizon::ThreeMonths => Duration::from_secs(12 * 60 * 60), // 12 hours
                 LongForecastHorizon::SixMonths => Duration::from_secs(12 * 60 * 60), // 12 hours
                 LongForecastHorizon::OneYear => Duration::from_secs(12 * 60 * 60), // 12 hours
+                LongForecastHorizon::TwoYears => Duration::from_secs(12 * 60 * 60), // 12 hours
+                LongForecastHorizon::ThreeYears => Duration::from_secs(12 * 60 * 60), // 12 hours
                 LongForecastHorizon::FourYears => Duration::from_secs(12 * 60 * 60), // 12 hours
             },
         }
