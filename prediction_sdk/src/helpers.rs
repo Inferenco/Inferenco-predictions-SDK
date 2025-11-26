@@ -6,7 +6,8 @@ use statrs::statistics::Statistics;
 
 use crate::dto::{
     ForecastDecomposition, LongForecastHorizon, MonteCarloBenchmark, MonteCarloRun,
-    PredictionError, PricePoint, SentimentSnapshot, ShortForecastHorizon, SimulationStepSample,
+    PredictionError, PricePoint, SamplePath, SentimentSnapshot, ShortForecastHorizon,
+    SimulationStepSample,
 };
 
 pub(crate) fn short_horizon_window(horizon: ShortForecastHorizon) -> usize {
@@ -416,6 +417,92 @@ pub(crate) fn decompose_series(
         momentum,
         noise,
     })
+}
+
+pub(crate) fn select_representative_paths(
+    prices: &[PricePoint],
+    days: u32,
+    drift: f64,
+    volatility_path: &[f64],
+    target_p10: f64,
+    target_mean: f64,
+    target_p90: f64,
+) -> Result<Vec<SamplePath>, PredictionError> {
+    let sample_simulations = 1000;
+    
+    let last_price = latest_price(prices)?;
+    let mut rng = rand::thread_rng();
+    let time_step = 1.0;
+    
+    struct CandidatePath {
+        final_price: f64,
+        points: Vec<f64>,
+    }
+    
+    let mut candidates = Vec::with_capacity(sample_simulations);
+    
+    for _ in 0..sample_simulations {
+        let mut price = last_price;
+        let mut points = Vec::with_capacity(days as usize);
+        
+        for day in 0..days as usize {
+            let volatility = *volatility_path
+                .get(day)
+                .ok_or(PredictionError::InsufficientData)?;
+            let z: f64 = rng.sample(StandardNormal);
+            let drift_component = (drift - (volatility.powi(2) / 2.0)) * time_step;
+            let shock = volatility * time_step.sqrt() * z;
+            let step = drift_component + shock;
+            price *= step.exp();
+            points.push(price);
+        }
+        
+        candidates.push(CandidatePath {
+            final_price: price,
+            points,
+        });
+    }
+    
+    candidates.sort_by(|a, b| a.final_price.partial_cmp(&b.final_price).unwrap_or(Ordering::Equal));
+    
+    let find_closest = |target: f64| -> Option<CandidatePath> {
+        candidates
+            .iter()
+            .min_by(|a, b| {
+                let diff_a = (a.final_price - target).abs();
+                let diff_b = (b.final_price - target).abs();
+                diff_a.partial_cmp(&diff_b).unwrap_or(Ordering::Equal)
+            })
+            .map(|p| CandidatePath {
+                final_price: p.final_price,
+                points: p.points.clone(),
+            })
+    };
+    
+    let mut selected_paths = Vec::new();
+    
+    if let Some(bearish) = find_closest(target_p10) {
+        selected_paths.push(SamplePath {
+            label: "bearish".to_string(),
+            points: bearish.points,
+        });
+    }
+    
+    if let Some(mean) = find_closest(target_mean) {
+        selected_paths.push(SamplePath {
+            label: "mean".to_string(),
+            points: mean.points,
+        });
+    }
+    
+    if let Some(bullish) = find_closest(target_p90) {
+        selected_paths.push(SamplePath {
+            label: "bullish".to_string(),
+            points: bullish.points,
+        });
+    }
+    
+    Ok(selected_paths)
 }
 
 #[cfg(test)]

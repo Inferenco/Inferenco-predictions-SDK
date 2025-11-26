@@ -487,6 +487,17 @@ impl PredictionSdk {
         // Calculate technical signals (still useful for long horizons as a starting point)
         let technical_signals = analysis::calculate_technical_signals(history).ok();
 
+        // Generate representative sample paths
+        let sample_paths = helpers::select_representative_paths(
+            history,
+            days,
+            arithmetic_drift,
+            &volatility_path,
+            percentile_10,
+            adjusted_mean,
+            percentile_90,
+        ).ok();
+
         let projection = if chart {
             let last_timestamp = history
                 .iter()
@@ -528,6 +539,7 @@ impl PredictionSdk {
                 confidence,
                 technical_signals,
                 ml_prediction: None,  // Long forecasts use Monte Carlo, not ML
+                sample_paths,
             },
             projection,
         ))
@@ -1170,5 +1182,49 @@ mod tests {
             .expect("moving average should succeed");
 
         assert!(result.expected_price < moving_average);
+    }
+
+    #[tokio::test]
+    async fn test_long_forecast_includes_sample_paths() {
+        let sdk = PredictionSdk::new().unwrap();
+        
+        // Create mock history
+        let mut history = Vec::new();
+        let start = Utc::now() - Duration::days(100);
+        let mut price = 100.0;
+        for i in 0..100 {
+            history.push(PricePoint {
+                timestamp: start + Duration::days(i),
+                price,
+                volume: None,
+            });
+            // Add some volatility
+            price *= if i % 2 == 0 { 1.01 } else { 0.99 };
+        }
+        
+        let result = sdk.run_long_forecast(
+            &history, 
+            LongForecastHorizon::OneMonth, 
+            None, 
+            false
+        ).await;
+
+        assert!(result.is_ok());
+        let (forecast, _) = result.unwrap();
+        
+        assert!(forecast.sample_paths.is_some());
+        let paths = forecast.sample_paths.unwrap();
+        assert_eq!(paths.len(), 3);
+        
+        let labels: Vec<String> = paths.iter().map(|p| p.label.clone()).collect();
+        assert!(labels.contains(&"bullish".to_string()));
+        assert!(labels.contains(&"bearish".to_string()));
+        assert!(labels.contains(&"mean".to_string()));
+        
+        // Verify points are populated
+        for path in paths {
+            assert!(!path.points.is_empty());
+            assert_eq!(path.points.len() as u32, crate::helpers::long_horizon_days(LongForecastHorizon::OneMonth));
+        }
     }
 }

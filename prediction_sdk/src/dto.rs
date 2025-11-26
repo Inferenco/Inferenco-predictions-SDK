@@ -245,6 +245,12 @@ pub struct ShortForecastResult {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SamplePath {
+    pub label: String,
+    pub points: Vec<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 /// Result of a long-horizon forecast.
 ///
 /// * `mean_price` is the Monte Carlo mean price in the requested
@@ -263,6 +269,8 @@ pub struct LongForecastResult {
     pub technical_signals: Option<TechnicalSignals>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_prediction: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_paths: Option<Vec<SamplePath>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
