@@ -409,6 +409,7 @@ impl PredictionSdk {
             ml_return_bounds,
             ml_price_interval,
             ml_interval_calibration,
+            sentiment,
         })
     }
 
@@ -487,6 +488,17 @@ impl PredictionSdk {
         // Calculate technical signals (still useful for long horizons as a starting point)
         let technical_signals = analysis::calculate_technical_signals(history).ok();
 
+        // Generate representative sample paths
+        let sample_paths = helpers::select_representative_paths(
+            history,
+            days,
+            arithmetic_drift,
+            &volatility_path,
+            percentile_10,
+            adjusted_mean,
+            percentile_90,
+        ).ok();
+
         let projection = if chart {
             let last_timestamp = history
                 .iter()
@@ -528,6 +540,8 @@ impl PredictionSdk {
                 confidence,
                 technical_signals,
                 ml_prediction: None,  // Long forecasts use Monte Carlo, not ML
+                sample_paths,
+                sentiment,
             },
             projection,
         ))
@@ -777,6 +791,96 @@ impl PredictionSdk {
             )));
         }
     }
+
+    /// Fetch live sentiment data from external sources.
+    ///
+    /// Aggregates data from:
+    /// 1. Alternative.me Fear & Greed Index (mapped to news_score)
+    /// 2. CoinGecko Community Sentiment (mapped to social_score)
+    pub async fn fetch_live_sentiment(
+        &self,
+        asset_id: &str,
+    ) -> Result<SentimentSnapshot, PredictionError> {
+        let (fear_greed, community) = tokio::join!(
+            self.fetch_fear_and_greed(),
+            self.fetch_community_sentiment(asset_id)
+        );
+
+        // We proceed even if one fails, defaulting to 0.0
+        let news_score = fear_greed.unwrap_or(0.0);
+        let social_score = community.unwrap_or(0.0);
+
+        Ok(SentimentSnapshot {
+            news_score,
+            social_score,
+        })
+    }
+
+    async fn fetch_fear_and_greed(&self) -> Result<f64, PredictionError> {
+        let url = "https://api.alternative.me/fng/";
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| PredictionError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(PredictionError::Network("failed to fetch fear and greed".to_string()));
+        }
+
+        let payload: FearAndGreedResponse = response
+            .json()
+            .await
+            .map_err(|e| PredictionError::Serialization(e.to_string()))?;
+
+        let value_str = &payload.data.first().ok_or(PredictionError::InsufficientData)?.value;
+        let value: f64 = value_str.parse().map_err(|_| PredictionError::Serialization("invalid float".to_string()))?;
+
+        // Normalize 0-100 to -1.0 to 1.0
+        Ok((value - 50.0) / 50.0)
+    }
+
+    async fn fetch_community_sentiment(&self, asset_id: &str) -> Result<f64, PredictionError> {
+        let url = format!("{}/coins/{}", self.market_base_url, asset_id);
+        // We only need localization=false to save bandwidth, though standard endpoint returns full data
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("localization", "false"), ("tickers", "false"), ("market_data", "false"), ("community_data", "false"), ("developer_data", "false"), ("sparkline", "false")])
+            .send()
+            .await
+            .map_err(|e| PredictionError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(PredictionError::Network("failed to fetch coin data".to_string()));
+        }
+
+        let payload: CoinGeckoCommunityResponse = response
+            .json()
+            .await
+            .map_err(|e| PredictionError::Serialization(e.to_string()))?;
+
+        let up_percentage = payload.sentiment_votes_up_percentage.unwrap_or(50.0);
+
+        // Normalize 0-100 to -1.0 to 1.0
+        Ok((up_percentage - 50.0) / 50.0)
+    }
+}
+
+#[derive(Deserialize)]
+struct FearAndGreedResponse {
+    data: Vec<FearAndGreedData>,
+}
+
+#[derive(Deserialize)]
+struct FearAndGreedData {
+    value: String,
+}
+
+#[derive(Deserialize)]
+struct CoinGeckoCommunityResponse {
+    sentiment_votes_up_percentage: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -1170,5 +1274,49 @@ mod tests {
             .expect("moving average should succeed");
 
         assert!(result.expected_price < moving_average);
+    }
+
+    #[tokio::test]
+    async fn test_long_forecast_includes_sample_paths() {
+        let sdk = PredictionSdk::new().unwrap();
+        
+        // Create mock history
+        let mut history = Vec::new();
+        let start = Utc::now() - Duration::days(100);
+        let mut price = 100.0;
+        for i in 0..100 {
+            history.push(PricePoint {
+                timestamp: start + Duration::days(i),
+                price,
+                volume: None,
+            });
+            // Add some volatility
+            price *= if i % 2 == 0 { 1.01 } else { 0.99 };
+        }
+        
+        let result = sdk.run_long_forecast(
+            &history, 
+            LongForecastHorizon::OneMonth, 
+            None, 
+            false
+        ).await;
+
+        assert!(result.is_ok());
+        let (forecast, _) = result.unwrap();
+        
+        assert!(forecast.sample_paths.is_some());
+        let paths = forecast.sample_paths.unwrap();
+        assert_eq!(paths.len(), 3);
+        
+        let labels: Vec<String> = paths.iter().map(|p| p.label.clone()).collect();
+        assert!(labels.contains(&"bullish".to_string()));
+        assert!(labels.contains(&"bearish".to_string()));
+        assert!(labels.contains(&"mean".to_string()));
+        
+        // Verify points are populated
+        for path in paths {
+            assert!(!path.points.is_empty());
+            assert_eq!(path.points.len() as u32, crate::helpers::long_horizon_days(LongForecastHorizon::OneMonth));
+        }
     }
 }

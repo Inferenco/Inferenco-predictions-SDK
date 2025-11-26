@@ -242,6 +242,14 @@ pub struct ShortForecastResult {
     pub ml_price_interval: Option<(f64, f64)>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_interval_calibration: Option<IntervalCalibration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sentiment: Option<SentimentSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SamplePath {
+    pub label: String,
+    pub points: Vec<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -263,6 +271,10 @@ pub struct LongForecastResult {
     pub technical_signals: Option<TechnicalSignals>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ml_prediction: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_paths: Option<Vec<SamplePath>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sentiment: Option<SentimentSnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
