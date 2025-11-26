@@ -69,9 +69,12 @@ impl PredictionSdk {
         let api_cache = Arc::new(ApiCache::new());
         let forecast_cache = Arc::new(ForecastCache::new());
 
+        let market_base_url = std::env::var("COINGECKO_API_URL")
+            .unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+
         Ok(Self {
             client,
-            market_base_url: DEFAULT_BASE_URL.to_string(),
+            market_base_url,
             limiter,
             api_cache,
             forecast_cache,
