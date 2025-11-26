@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## [0.1.9] - 2025-11-26
+
+### Added
+- **Representative Sample Paths**: `LongForecastResult` now includes `sample_paths`—three representative volatile price paths (bullish, mean, bearish) selected from a secondary Monte Carlo simulation batch.
+  - Allows frontends to visualize realistic volatility alongside the smooth confidence bands.
+- **Live Sentiment Integration**: Added `fetch_live_sentiment(asset_id)` to automatically fetch and map real-time sentiment data.
+  - **Fear & Greed Index** (Alternative.me) $\to$ `news_score`
+  - **CoinGecko Community Sentiment** $\to$ `social_score`
+- **Sentiment Echo**: `LongForecastResult` and `ShortForecastResult` now include a `sentiment` field that echoes the `SentimentSnapshot` used for the forecast, making it easier to display the driving factors.
+
 
 ## [0.1.8] - 2025-11-24
 
