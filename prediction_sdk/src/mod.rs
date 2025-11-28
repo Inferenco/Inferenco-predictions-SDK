@@ -10,6 +10,8 @@ pub mod dto;
 pub mod handler;
 #[path = "helpers.rs"]
 pub(crate) mod helpers;
+#[path = "ten_forward/mod.rs"]
+pub mod ten_forward;
 pub mod implementation {
     include!("impl.rs");
 }
